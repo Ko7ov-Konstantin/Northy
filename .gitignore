@@ -1,0 +1,6 @@
+.build/
+Northy.app/
+.DS_Store
+scripts/Northy.iconset/
+scripts/AppIcon1024.png
+scripts/Northy.icns
