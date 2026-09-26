@@ -72,12 +72,16 @@ final class TrackingHostingView<Content: View>: NSHostingView<Content> {
         trackingArea = area
     }
 
+    // Через эти же методы SwiftUI получает свои события наведения (onHover у кнопок
+    // и строк): без super они терялись. Колбэки — только для своей области всего окна.
     override func mouseEntered(with event: NSEvent) {
-        onMouseEntered?()
+        super.mouseEntered(with: event)
+        if event.trackingArea === trackingArea { onMouseEntered?() }
     }
 
     override func mouseExited(with event: NSEvent) {
-        onMouseExited?()
+        super.mouseExited(with: event)
+        if event.trackingArea === trackingArea { onMouseExited?() }
     }
 }
 
