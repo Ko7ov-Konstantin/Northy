@@ -218,21 +218,25 @@ struct TranslatorView: View {
 
     private func languagePill(_ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.primaryText)
-                    .contentTransition(.opacity)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(Theme.secondaryText)
+            HoverReader { hovering in
+                HStack(spacing: 5) {
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.primaryText)
+                        .contentTransition(.opacity)
+                    // Шеврон светлеет под курсором — подсказка, что клик переключает язык.
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(hovering ? Theme.primaryText : Theme.secondaryText)
+                        .animation(Hover.fade, value: hovering)
+                }
+                .padding(.horizontal, 11)
+                .frame(height: 26)
+                .background(Capsule().fill(Color.white.opacity(0.08)))
+                .contentShape(Capsule())
+                .hoverGlow(hovering, in: Capsule(), style: .capsule(Theme.violet))
+                .animation(.easeOut(duration: 0.15), value: title)
             }
-            .padding(.horizontal, 11)
-            .frame(height: 26)
-            .background(Capsule().fill(Color.white.opacity(0.08)))
-            .contentShape(Capsule())
-            .hoverGlow(in: Capsule(), style: .capsule(Theme.violet))
-            .animation(.easeOut(duration: 0.15), value: title)
         }
         .buttonStyle(.pressable)
         .pointerStyle(.link)

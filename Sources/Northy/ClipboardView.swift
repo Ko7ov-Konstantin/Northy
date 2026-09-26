@@ -218,7 +218,12 @@ private struct ClipboardRow: View {
     let onRemove: () -> Void
 
     @State private var isHovering = false
+    @State private var spot = PointerSpot()
     @State private var thumbnail: NSImage?
+    @Environment(\.hoverGlowEnabled) private var glowEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let shape = RoundedRectangle(cornerRadius: 12, style: .continuous)
 
     var body: some View {
         HStack(spacing: 10) {
@@ -250,19 +255,39 @@ private struct ClipboardRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(isCopied ? Theme.mint.opacity(0.12) : (isHovering || isSelected ? Theme.cardHover : Theme.card))
-        )
+        .background {
+            ZStack {
+                Self.shape
+                    .fill(isCopied ? Theme.mint.opacity(0.12) : (isHovering || isSelected ? Theme.cardHover : Theme.card))
+                if showsSheen {
+                    PointerSheen(spot: spot, shape: Self.shape)
+                }
+            }
+        }
         // Строка в ScrollView только светится: подъём обрезал бы края, ореол лез бы на соседей.
-        .hoverGlow(isHovering && !isSelected && !isCopied, in: RoundedRectangle(cornerRadius: 12, style: .continuous), style: .surface)
+        .hoverGlow(isHovering && !isSelected && !isCopied, in: Self.shape, style: .surface)
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            Self.shape
                 .strokeBorder(borderColor, lineWidth: isSelected ? 1.2 : 0.8)
         )
         // Без contentShape в HStack со Spacer кликается только область текста.
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onHover { isHovering = $0 }
+        .contentShape(Self.shape)
+        .onContinuousHover { phase in
+            switch phase {
+            case .active(let point):
+                if !isHovering { isHovering = true }
+                spot.location = point
+            case .ended:
+                isHovering = false
+                spot.location = nil
+            }
+        }
+        .onChange(of: glowEnabled) { _, on in
+            if !on {
+                isHovering = false
+                spot.location = nil
+            }
+        }
         .onTapGesture(perform: onTap)
         .pointerStyle(.link)
         .animation(.easeOut(duration: 0.15), value: isHovering)
@@ -273,6 +298,10 @@ private struct ClipboardRow: View {
         if isCopied { return Theme.mint.opacity(0.45) }
         if isSelected { return Theme.sky.opacity(0.6) }
         return .clear
+    }
+
+    private var showsSheen: Bool {
+        isHovering && glowEnabled && !isSelected && !isCopied && !reduceMotion
     }
 
     private var tileTint: Color {

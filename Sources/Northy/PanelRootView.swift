@@ -267,9 +267,12 @@ private struct LimitsBadge: View {
                             }
                             // Каждое кольцо светится своим цветом, волной слева направо.
                             .background {
-                                if lit {
-                                    Circle().fill(window.accent.opacity(0.32)).blur(radius: 4)
+                                ZStack {
+                                    if lit {
+                                        Circle().fill(window.accent.opacity(0.32)).blur(radius: 4)
+                                    }
                                 }
+                                .animation(fade, value: lit)
                             }
                             .animation(ringAnimation(index)) {
                                 $0.scaleEffect(lit && !reduceMotion ? 1.08 : 1)
@@ -277,12 +280,15 @@ private struct LimitsBadge: View {
                             .help("\(window.title): осталось \(window.remaining)%")
                     }
                 }
+                // Затухание — только на слоях подсветки: numericText в кольцах не трогается.
                 .background {
-                    if lit {
-                        Capsule().fill(Color.white.opacity(0.06)).padding(-3)
+                    ZStack {
+                        if lit {
+                            Capsule().fill(Color.white.opacity(0.06)).padding(-3)
+                        }
                     }
+                    .animation(fade, value: lit)
                 }
-                .animation(reduceMotion ? Hover.reduced : Hover.fade, value: lit)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.pressable)
@@ -291,6 +297,8 @@ private struct LimitsBadge: View {
             .onChange(of: glowEnabled) { _, on in if !on { isHovering = false } }
         }
     }
+
+    private var fade: Animation { reduceMotion ? Hover.reduced : Hover.fade }
 
     private func ringAnimation(_ index: Int) -> Animation {
         if reduceMotion { return Hover.reduced }
@@ -335,6 +343,7 @@ private struct TabPill: View {
                 Image(systemName: tab.icon)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(isSelected ? tab.tint : (lit ? tab.tint.opacity(0.9) : Theme.secondaryText))
+                    .animation(fade, value: lit)
                     .animation(lit ? Hover.enter : Hover.exit) {
                         $0.scaleEffect(lit && !reduceMotion ? 1.12 : 1)
                     }
@@ -348,23 +357,29 @@ private struct TabPill: View {
             }
             .padding(.horizontal, 10)
             .frame(height: 26)
+            // Затухание — только на слоях подсветки: matched-капсула под него не попадает.
             .background {
                 if isSelected {
                     // Кромка — внутри matched-капсулы, чтобы при переключении летела вместе с ней.
                     Capsule()
                         .fill(tab.tint.opacity(0.2))
                         .overlay {
-                            if lit { rim(0.55) }
+                            ZStack { if lit { rim(0.55) } }
+                                .animation(fade, value: lit)
                         }
                         .matchedGeometryEffect(id: "tabPill", in: namespace)
-                } else if lit {
+                } else {
                     // Наведение заранее показывает цвет вкладки — по клику он перетекает в капсулу.
-                    Capsule()
-                        .fill(tab.tint.opacity(0.10))
-                        .overlay { rim(0.35) }
+                    ZStack {
+                        if lit {
+                            Capsule()
+                                .fill(tab.tint.opacity(0.10))
+                                .overlay { rim(0.35) }
+                        }
+                    }
+                    .animation(fade, value: lit)
                 }
             }
-            .animation(reduceMotion ? Hover.reduced : Hover.fade, value: lit)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -373,6 +388,8 @@ private struct TabPill: View {
         .onChange(of: glowEnabled) { _, on in if !on { isHovering = false } }
         .help(tab.title)
     }
+
+    private var fade: Animation { reduceMotion ? Hover.reduced : Hover.fade }
 
     private func rim(_ top: Double) -> some View {
         Capsule()

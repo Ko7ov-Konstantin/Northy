@@ -135,6 +135,36 @@ struct HoverReader<Content: View>: View {
     }
 }
 
+/// Где курсор над строкой. Читает только слой пятна — body строки
+/// на каждое движение мыши не пересчитывается.
+@Observable
+final class PointerSpot {
+    var location: CGPoint?
+}
+
+/// Едва заметное пятно света, которое идёт за курсором по поверхности.
+struct PointerSheen<S: Shape>: View {
+    var spot: PointerSpot
+    var shape: S
+    var radius: CGFloat = 110
+
+    var body: some View {
+        if let location = spot.location {
+            GeometryReader { proxy in
+                RadialGradient(
+                    colors: [.white.opacity(0.06), .clear],
+                    center: UnitPoint(x: location.x / max(proxy.size.width, 1), y: location.y / max(proxy.size.height, 1)),
+                    startRadius: 0,
+                    endRadius: radius
+                )
+            }
+            .clipShape(shape)
+            .blendMode(.plusLighter)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
 struct PressableButtonStyle: ButtonStyle {
     var pressedScale: CGFloat = 0.95
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
