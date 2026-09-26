@@ -118,6 +118,8 @@ final class PanelController: NSObject {
     let tokenStore = TokenStatsStore()
     let settings = AppSettings()
     private let hotKey = GlobalHotKey()
+    private let diskAccessGuide = DiskAccessGuide()
+    private var tabsObserved = false
     private lazy var settingsWindow = SettingsWindowController { [unowned self] in
         SettingsView(settings: settings) { [weak self] in self?.clipboardStore.clear() }
     }
@@ -695,7 +697,10 @@ final class PanelController: NSObject {
         } onChange: { [weak self] in
             DispatchQueue.main.async { self?.observeEnabledTabs() }
         }
+        let limitsTurnedOn = tabsObserved && enabled.contains(.limits) && !uiState.enabledTabs.contains(.limits)
+        tabsObserved = true
         uiState.enabledTabs = enabled
+        if limitsTurnedOn { requestDiskAccessIfNeeded() }
         let resolved = PanelTab.resolve(uiState.selectedTab, enabled: enabled)
         if resolved != uiState.selectedTab {
             withAnimation(Theme.tabSpring) { uiState.selectedTab = resolved }
@@ -703,6 +708,14 @@ final class PanelController: NSObject {
     }
 
     private var filesEnabled: Bool { uiState.enabledTabs.contains(.files) }
+
+    /// Лимиты читают cookies Safari — без «Полного доступа к диску» сразу ведём
+    /// в нужный раздел Системных настроек и показываем помощника рядом.
+    private func requestDiskAccessIfNeeded() {
+        guard FullDiskAccess.status() == .denied else { return }
+        diskAccessGuide.onGranted = { [weak self] in self?.refreshEverything(force: true) }
+        diskAccessGuide.start()
+    }
 
     /// Клавиша — явное действие: панель раскрывается и берёт фокус ввода
     /// (как «Показать панель» из меню); повторное нажатие сворачивает.
