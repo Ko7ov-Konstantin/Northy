@@ -5,7 +5,7 @@ import AppKit
 final class NotchPanel: NSPanel {
 
     /// Escape сворачивает панель. performKeyEquivalent приходит, только пока
-    /// панель ключевая — развёрнутая через hover панель как раз ключ (expand → makeKey).
+    /// панель ключевая — открытая панель под мышью ключевая (takeKeyForPointer).
     var onEscape: (() -> Void)?
     /// ⌘1…⌘9 — номер вкладки (с единицы), ⌘F — поиск в буфере.
     var onTabShortcut: ((Int) -> Void)?
@@ -35,8 +35,8 @@ final class NotchPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
 
-    /// Ключевым окно становится по явному клику, до диспетчеризации события:
-    /// наведение (hover-разворот) фокус ввода у активного приложения не крадёт.
+    /// По клику окно становится ключевым до диспетчеризации события — на случай,
+    /// если панель открылась без мыши над ней (показ полки из Finder).
     override func sendEvent(_ event: NSEvent) {
         if event.type == .leftMouseDown, !isKeyWindow {
             makeKey()

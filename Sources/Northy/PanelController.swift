@@ -678,11 +678,18 @@ final class PanelController: NSObject {
     private func handleMouseEntered() {
         collapseWorkItem?.cancel()
         collapseWorkItem = nil
-        guard !uiState.isExpanded, settings.openOnHover else { return }
+        if uiState.isExpanded {
+            takeKeyForPointer()
+            return
+        }
+        guard settings.openOnHover else { return }
         // Разворот с короткой паузой (dwell): быстрый проход курсора мимо
         // выреза по пути к меню-бару панель не раскрывает.
         expandWorkItem?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.expand() }
+        let item = DispatchWorkItem { [weak self] in
+            self?.expand()
+            self?.takeKeyForPointer()
+        }
         expandWorkItem = item
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.expandDelay, execute: item)
     }
@@ -718,8 +725,8 @@ final class PanelController: NSObject {
                 self.uiState.isExpanded = true
             }
         }
-        // Ключевым панель становится только по явному клику (NotchPanel.sendEvent):
-        // наведение не крадёт фокус ввода у активного приложения.
+        // Ключевой панель становится, когда под ней мышь (takeKeyForPointer), или по
+        // клику (NotchPanel.sendEvent); показ полки из Finder фокус не берёт.
         // SwiftUI может домонтировать AppKit-вью (NSTextView и т.п.) лениво при
         // первом реальном показе — повторяем снятие регистрации на всякий случай.
         hostingView.unregisterDraggedTypesRecursively()
@@ -752,6 +759,29 @@ final class PanelController: NSObject {
     private func finishResize() {
         uiState.isResizing = false
         NotchGeometry.storeContentSize(NotchGeometry.contentSize, in: .standard)
+    }
+
+    /// Курсоры (рука над кнопками) macOS меняет только у ключевого окна — иначе над
+    /// панелью остаётся курсор окна под ней. Поэтому открытая панель под мышью
+    /// берёт клавиатуру, а свернувшись, отдаёт её обратно (returnKeyFocus).
+    private func takeKeyForPointer() {
+        guard !panel.isKeyWindow, panel.frame.contains(NSEvent.mouseLocation) else { return }
+        let responder = panel.firstResponder
+        panel.makeKey()
+        // Стать ключевой — не значит начать печатать: поле ввода само фокус не получает.
+        if panel.firstResponder !== responder {
+            panel.makeFirstResponder(responder)
+        }
+    }
+
+    /// Свёрнутая панель клавиатуру не держит. Отдать ввод окну другого приложения
+    /// напрямую нельзя — после переупорядочивания его забирает активное приложение.
+    /// Мышь над вырезом — ждём её ухода: переупорядочивание под ней снова раскрыло бы
+    /// панель, а на выходе мыши сворачивание (и этот возврат) вызывается повторно.
+    private func returnKeyFocus() {
+        guard panel.isKeyWindow, !panel.frame.contains(NSEvent.mouseLocation) else { return }
+        panel.orderOut(nil)
+        panel.orderFrontRegardless()
     }
 
     private func handleMouseExited() {
@@ -801,6 +831,7 @@ final class PanelController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.collapseAnimationDuration) { [weak self] in
             guard let self, self.uiState.isExpanded == false, self.expandGeneration == generation else { return }
             self.panel.setFrame(NotchGeometry.collapsedFrame(), display: true)
+            self.returnKeyFocus()
         }
     }
 
