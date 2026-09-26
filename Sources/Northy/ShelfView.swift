@@ -48,6 +48,12 @@ private struct ShelfTile: View {
     let onRemove: () -> Void
 
     @State private var isHovering = false
+    @State private var spot = PointerSpot()
+    @Environment(\.hoverGlowEnabled) private var glowEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private static let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+    private var lit: Bool { isHovering && glowEnabled }
     /// Иконка и проверка существования кэшируются один раз на показ плитки:
     /// NSWorkspace.icon и stat при каждом body (наведение перерисовывает) — дорого.
     @State private var fileIcon: NSImage?
@@ -65,7 +71,15 @@ private struct ShelfTile: View {
                 }
                 .frame(width: 46, height: 46)
                 .opacity(fileExists ? 1 : 0.4)
-                .scaleEffect(isHovering ? 1.08 : 1)
+                // Иконка приподнимается и светится янтарным ореолом.
+                .background {
+                    if lit {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Theme.amber.opacity(0.35))
+                            .blur(radius: 9)
+                    }
+                }
+                .scaleEffect(lit && !reduceMotion ? 1.08 : 1)
                 // Файл могли удалить или переместить после добавления на полку —
                 // вместо молчаливой битой ссылки показываем признак и тусклим плитку.
                 if !fileExists {
@@ -87,10 +101,14 @@ private struct ShelfTile: View {
         .padding(.horizontal, 6)
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(isHovering ? Theme.cardHover : Theme.card)
-        )
+        // Свет плитки — поверх заливки и внутри формы: в сетке прокрутки ничего не выходит наружу.
+        .background {
+            if lit && !reduceMotion {
+                PointerSheen(spot: spot, shape: Self.shape, tint: Theme.amber)
+            }
+        }
+        .hoverGlow(lit, in: Self.shape, style: .plate(Theme.amber))
+        .background(Self.shape.fill(isHovering ? Theme.cardHover : Theme.card))
         .overlay(alignment: .top) {
             HStack(spacing: 0) {
                 if fileExists {
@@ -122,7 +140,20 @@ private struct ShelfTile: View {
             fileExists = FileManager.default.fileExists(atPath: url.path)
             fileIcon = NSWorkspace.shared.icon(forFile: url.path)
         }
-        .onHover { isHovering = $0 }
+        .onHover { isHovering = $0 && glowEnabled }
+        .onContinuousHover { phase in
+            guard glowEnabled, case .active(let point) = phase else {
+                spot.location = nil
+                return
+            }
+            spot.location = point
+        }
+        .onChange(of: glowEnabled) { _, on in
+            if !on {
+                isHovering = false
+                spot.location = nil
+            }
+        }
         .onDrag { NSItemProvider(object: url as NSURL) }
         .help(url.path)
     }

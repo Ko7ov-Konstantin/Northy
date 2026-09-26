@@ -255,17 +255,18 @@ private struct ClipboardRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 7)
+        // Строка в ScrollView только светится изнутри: подъём обрезал бы края, ореол лез бы на соседей.
+        // Свет — поверх заливки карточки, поэтому модификаторы идут до .background.
         .background {
-            ZStack {
-                Self.shape
-                    .fill(isCopied ? Theme.mint.opacity(0.12) : (isHovering || isSelected ? Theme.cardHover : Theme.card))
-                if showsSheen {
-                    PointerSheen(spot: spot, shape: Self.shape)
-                }
+            if showsSheen {
+                PointerSheen(spot: spot, shape: Self.shape, tint: tileTint)
             }
         }
-        // Строка в ScrollView только светится: подъём обрезал бы края, ореол лез бы на соседей.
-        .hoverGlow(isHovering && !isSelected && !isCopied, in: Self.shape, style: .surface)
+        .hoverGlow(isHovering && !isSelected && !isCopied, in: Self.shape, style: .surface(tileTint))
+        .background {
+            Self.shape
+                .fill(isCopied ? Theme.mint.opacity(0.12) : (isHovering || isSelected ? Theme.cardHover : Theme.card))
+        }
         .overlay(
             Self.shape
                 .strokeBorder(borderColor, lineWidth: isSelected ? 1.2 : 0.8)
@@ -289,7 +290,7 @@ private struct ClipboardRow: View {
         }
         .onTapGesture(perform: onTap)
         .pointerStyle(.link)
-        .animation(.easeOut(duration: 0.15), value: isHovering)
+        .animation(isHovering ? Hover.enter : Hover.exit, value: isHovering)
         .help("Нажмите, чтобы скопировать")
     }
 
@@ -307,7 +308,7 @@ private struct ClipboardRow: View {
         switch entry.content {
         case .text: Theme.sky
         case .files: Theme.amber
-        case .image: Theme.secondaryText
+        case .image: Theme.violet
         }
     }
 
@@ -338,6 +339,8 @@ private struct ClipboardRow: View {
                 IconButton(systemName: "xmark", size: 22, help: "Убрать из истории", action: onRemove)
             }
             .opacity(isHovering || isRecognizing ? 1 : 0)
+            // Кнопки выезжают справа, а не просто проявляются.
+            .offset(x: isHovering || isRecognizing || reduceMotion ? 0 : 8)
         }
     }
 

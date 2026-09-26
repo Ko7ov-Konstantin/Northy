@@ -21,6 +21,10 @@ struct HoverGlowStyle {
     var aura: Double = 0.28
     var halo: CGFloat = 4
     var wash: Double = 0
+    /// Свет от левого края (от иконки строки) к середине.
+    var lead: Double = 0
+    var leadStart: UnitPoint = .leading
+    var leadEnd: UnitPoint = .trailing
     var sheen: Double = 0
     var rim: Color? = nil
     var rimTop: Double = 0.5
@@ -38,11 +42,21 @@ struct HoverGlowStyle {
         Self(tint: tint, scale: 1.10, aura: 0.35, halo: 4, wash: 0.12, rimTop: 0.6)
     }
     static func tile(_ tint: Color) -> Self {
-        Self(tint: tint, scale: 1.05, aura: 0.30, halo: 4, rimTop: 0)
+        Self(tint: tint, scale: 1.08, aura: 0.42, halo: 5, rimTop: 0)
     }
     static let destructive = Self(tint: Theme.danger, scale: 1.04, aura: 0.45, halo: 4, rim: .white, rimTop: 0.45, rimBottom: 0.08)
-    /// Для строк в ScrollView: без подъёма и ореола — иначе края обрезаются и свет залезает на соседей.
-    static let surface = Self(scale: 1, aura: 0, sheen: 0.05, rim: .white, rimTop: 0.20, rimBottom: 0.03, rimWidth: 0.8)
+    /// Для строк в ScrollView: без подъёма и ореола — иначе края обрезаются и свет
+    /// залезает на соседей. Строка светится изнутри цветом своего типа.
+    static func surface(_ tint: Color) -> Self {
+        Self(tint: tint, scale: 1, aura: 0, lead: 0.16, sheen: 0.05, rimTop: 0.5, rimBottom: 0.06, rimWidth: 0.9)
+    }
+    /// Плитка в сетке: как строка, но свет сверху — от иконки файла.
+    static func plate(_ tint: Color) -> Self {
+        var style = surface(tint)
+        style.leadStart = .top
+        style.leadEnd = .bottom
+        return style
+    }
     static let glyph = Self(scale: 1.15, aura: 0, rimTop: 0)
 }
 
@@ -69,6 +83,17 @@ struct HoverGlow<S: InsettableShape>: ViewModifier {
                         }
                         if style.wash > 0 {
                             shape.fill(style.tint.opacity(style.wash))
+                        }
+                        if style.lead > 0 {
+                            shape.fill(LinearGradient(
+                                stops: [
+                                    .init(color: style.tint.opacity(style.lead), location: 0),
+                                    .init(color: style.tint.opacity(style.lead * 0.3), location: 0.4),
+                                    .init(color: .clear, location: 0.8),
+                                ],
+                                startPoint: style.leadStart,
+                                endPoint: style.leadEnd
+                            ))
                         }
                         if style.sheen > 0 {
                             shape.fill(LinearGradient(colors: [.white.opacity(style.sheen), .clear], startPoint: .top, endPoint: .center))
@@ -143,17 +168,18 @@ final class PointerSpot {
     var location: CGPoint?
 }
 
-/// Едва заметное пятно света, которое идёт за курсором по поверхности.
+/// Пятно света цвета поверхности, которое идёт за курсором.
 struct PointerSheen<S: Shape>: View {
     var spot: PointerSpot
     var shape: S
-    var radius: CGFloat = 110
+    var tint: Color = .white
+    var radius: CGFloat = 150
 
     var body: some View {
         if let location = spot.location {
             GeometryReader { proxy in
                 RadialGradient(
-                    colors: [.white.opacity(0.06), .clear],
+                    colors: [tint.opacity(0.13), tint.opacity(0.04), .clear],
                     center: UnitPoint(x: location.x / max(proxy.size.width, 1), y: location.y / max(proxy.size.height, 1)),
                     startRadius: 0,
                     endRadius: radius

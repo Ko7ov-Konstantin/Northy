@@ -7,9 +7,12 @@ struct HoverGlowTests {
     /// Строки буфера во всю ширину ScrollView: любой подъём обрезает края,
     /// а ореол залезает на соседние строки.
     @Test func surfacesInScrollViewOnlyLightUp() {
-        #expect(HoverGlowStyle.surface.scale == 1)
-        #expect(HoverGlowStyle.surface.aura == 0)
-        #expect(HoverGlowStyle.surface.wash == 0)
+        let surface = HoverGlowStyle.surface(Theme.sky)
+        #expect(surface.scale == 1)
+        #expect(surface.aura == 0)
+        #expect(surface.wash == 0)
+        #expect(surface.lead > 0, "свет от иконки — внутри формы, наружу ничего")
+        #expect(surface.tint == Theme.sky, "строка светится цветом своего типа")
     }
 
     /// Крестик в поле поиска сидит вплотную к тексту — без ореола и кромки.
