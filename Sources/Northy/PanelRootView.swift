@@ -128,9 +128,11 @@ struct PanelRootView: View {
         }
         .overlay { DropHighlight(isActive: uiState.isDropTargeted, topInset: uiState.topInset) }
         .overlay(alignment: .bottomTrailing) {
+            // Уголок живёт в нижнем отступе острова (16 пт), где нет содержимого:
+            // раньше он перекрывал «Обновить» и «Копировать» в правом нижнем углу.
             ResizeHandle(uiState: uiState)
-                .padding(.trailing, Self.earRadius + 6)
-                .padding(.bottom, 6)
+                .padding(.trailing, Self.earRadius + 5)
+                .padding(.bottom, 1)
         }
     }
 
@@ -337,8 +339,8 @@ private struct ResizeHandle: View {
     var body: some View {
         GripShape()
             .stroke(Color.white.opacity(isHovering || start != nil ? 0.55 : 0.22), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
-            .frame(width: 11, height: 11)
-            .frame(width: 22, height: 22)
+            .frame(width: 9, height: 9)
+            .frame(width: 26, height: 14)
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .pointerStyle(.frameResize(position: .bottomTrailing))
