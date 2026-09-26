@@ -84,7 +84,8 @@ nonisolated struct IslandShape: Shape {
 struct IconButton: View {
     let systemName: String
     var tint: Color = Theme.secondaryText
-    var hoverTint: Color = Theme.primaryText
+    /// nil — нейтральная кнопка: белеет и светится белым; цвет — светится им.
+    var hoverTint: Color? = nil
     var size: CGFloat = 26
     var help: String = ""
     let action: () -> Void
@@ -97,11 +98,11 @@ struct IconButton: View {
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: size * 0.46, weight: .semibold))
-                .foregroundStyle(lit ? hoverTint : tint)
+                .foregroundStyle(lit ? (hoverTint ?? Theme.primaryText) : tint)
                 .frame(width: size, height: size)
                 .background(Circle().fill(Color.white.opacity(lit ? 0.12 : 0.0)))
                 .contentShape(Circle())
-                .hoverGlow(lit, in: Circle(), style: .icon(hoverTint, neutral: hoverTint == Theme.primaryText))
+                .hoverGlow(lit, in: Circle(), style: .icon(hoverTint))
         }
         .buttonStyle(.pressable)
         .pointerStyle(.link)

@@ -18,11 +18,12 @@ struct HoverGlowTests {
         #expect(HoverGlowStyle.glyph.rimTop == 0)
     }
 
-    /// Нейтральные кнопки светятся тише цветных (выход, корзина).
+    /// Без цвета кнопка нейтральная и светится тише цветных (выход, корзина).
     @Test func neutralIconsGlowSofterThanColored() {
-        let neutral = HoverGlowStyle.icon(Theme.primaryText, neutral: true)
-        let colored = HoverGlowStyle.icon(Theme.danger, neutral: false)
+        let neutral = HoverGlowStyle.icon(nil)
+        let colored = HoverGlowStyle.icon(Theme.danger)
         #expect(neutral.aura < colored.aura)
         #expect(neutral.scale == colored.scale)
+        #expect(colored.tint == Theme.danger)
     }
 }

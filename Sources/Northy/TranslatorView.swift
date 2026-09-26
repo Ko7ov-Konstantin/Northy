@@ -20,6 +20,7 @@ struct TranslatorView: View {
     @State private var isTranslating = false
     /// Язык, определённый для «Авто» по последнему тексту («RU»/«EN»).
     @State private var detectedSource: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let debounceDelay: UInt64 = 500_000_000
 
@@ -191,14 +192,20 @@ struct TranslatorView: View {
                 }
                 swapLanguages()
             } label: {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Theme.violet)
-                    .rotationEffect(.degrees(swapRotation))
-                    .frame(width: 26, height: 26)
-                    .background(Circle().fill(Theme.violet.opacity(0.15)))
-                    .contentShape(Circle())
-                    .hoverGlow(in: Circle(), style: .accentCircle(Theme.violet))
+                HoverReader { hovering in
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(Theme.violet)
+                        .rotationEffect(.degrees(swapRotation))
+                        // Наклон под курсором — намёк на разворот; складывается с поворотом по клику.
+                        .animation(hovering ? Hover.enter : Hover.exit) {
+                            $0.rotationEffect(.degrees(hovering && !reduceMotion ? 18 : 0))
+                        }
+                        .frame(width: 26, height: 26)
+                        .background(Circle().fill(Theme.violet.opacity(0.15)))
+                        .contentShape(Circle())
+                        .hoverGlow(hovering, in: Circle(), style: .accentCircle(Theme.violet))
+                }
             }
             .buttonStyle(.pressable)
             .pointerStyle(.link)

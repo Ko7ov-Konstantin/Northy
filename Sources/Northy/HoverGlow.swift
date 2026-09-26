@@ -27,8 +27,9 @@ struct HoverGlowStyle {
     var rimBottom: Double = 0.06
     var rimWidth: CGFloat = 0.75
 
-    static func icon(_ tint: Color, neutral: Bool) -> Self {
-        Self(tint: tint, scale: 1.08, aura: neutral ? 0.10 : 0.26, halo: 3, rim: .white, rimTop: 0.26, rimBottom: 0.03)
+    /// nil — нейтральная кнопка: светится белым и тише цветных.
+    static func icon(_ tint: Color?) -> Self {
+        Self(tint: tint ?? .white, scale: 1.08, aura: tint == nil ? 0.10 : 0.26, halo: 3, rim: .white, rimTop: 0.26, rimBottom: 0.03)
     }
     static func capsule(_ tint: Color) -> Self {
         Self(tint: tint, scale: 1.04, aura: 0.24, halo: 4, wash: 0.07, rimTop: 0.55)

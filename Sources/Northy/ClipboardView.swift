@@ -272,15 +272,14 @@ private struct ClipboardRow: View {
         )
         // Без contentShape в HStack со Spacer кликается только область текста.
         .contentShape(Self.shape)
+        .onHover { isHovering = $0 && glowEnabled }
+        // Только координаты пятна: показ кнопок строки держится на onHover.
         .onContinuousHover { phase in
-            switch phase {
-            case .active(let point):
-                if !isHovering { isHovering = true }
-                spot.location = point
-            case .ended:
-                isHovering = false
+            guard glowEnabled, case .active(let point) = phase else {
                 spot.location = nil
+                return
             }
+            spot.location = point
         }
         .onChange(of: glowEnabled) { _, on in
             if !on {
