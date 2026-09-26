@@ -1,8 +1,8 @@
 import AppKit
 import SwiftUI
 
-enum PanelTab: CaseIterable, Identifiable, Hashable {
-    case clipboard, files, translator
+enum PanelTab: String, CaseIterable, Identifiable, Hashable {
+    case clipboard, files, translator, limits
 
     var id: Self { self }
 
@@ -11,85 +11,368 @@ enum PanelTab: CaseIterable, Identifiable, Hashable {
         case .clipboard: "Буфер"
         case .files: "Файлы"
         case .translator: "Переводчик"
+        case .limits: "Лимиты"
         }
     }
 
     var icon: String {
         switch self {
         case .clipboard: "doc.on.clipboard"
-        case .files: "folder"
+        case .files: "tray.full"
         case .translator: "character.bubble"
+        case .limits: "gauge.with.dots.needle.50percent"
         }
     }
+
+    var index: Int { Self.allCases.firstIndex(of: self) ?? 0 }
 }
 
+/// Корень панели — тёмный «остров», вырастающий из выреза. Окно уже имеет
+/// развёрнутый размер, а форма анимирует свой размер от выреза до полного:
+/// так выглядит «Dynamic Island», а не резкая смена фрейма окна.
 struct PanelRootView: View {
     var uiState: PanelUIState
     var clipboardStore: ClipboardStore
     var shelfStore: ShelfStore
+    var limitsStore: LimitsStore
+    var tokenStore: TokenStatsStore
+
+    private static let earRadius: CGFloat = 12
+    private static let bottomRadius: CGFloat = 30
+
+    private var isExpanded: Bool { uiState.isExpanded }
+
+    private var islandSize: CGSize {
+        isExpanded ? uiState.expandedSize : uiState.collapsedSize
+    }
+
+    private var shape: IslandShape {
+        IslandShape(
+            topRadius: isExpanded ? Self.earRadius : 4,
+            bottomRadius: isExpanded ? Self.bottomRadius : 10
+        )
+    }
 
     var body: some View {
-        // Единственное исключение из системной темы: полоса под физический вырез
-        // всегда чёрная — и в развёрнутом, и в свёрнутом состоянии, в обеих темах,
-        // чтобы визуально сливаться с настоящей чёлкой. Остальной фон — блюр рабочего
-        // стола от NSVisualEffectView на AppKit-уровне (PanelController), сюда SwiftUI
-        // фон не кладём — иначе поверх блюра лёг бы ещё один непрозрачный слой.
-        Group {
-            if uiState.isExpanded {
-                VStack(spacing: 0) {
-                    Color.black
-                        .frame(height: uiState.topInset)
-
-                    HStack(spacing: 0) {
-                        SidebarView(selectedTab: Binding(
-                            get: { uiState.selectedTab },
-                            set: { uiState.selectedTab = $0 }
-                        )) {
-                            NSApp.terminate(nil)
-                        }
-                        Divider()
-                            .overlay(Color.primary.opacity(0.12))
-                        content
-                    }
-                }
-            } else {
-                // Свёрнутая панель — только мёртвая зона выреза, тоже чёрная.
-                Color.black
-            }
+        ZStack(alignment: .top) {
+            background
+            // Содержимое всегда в дереве: свёртывание не сбрасывает набранный
+            // в переводчике текст и прокрутку истории.
+            expandedContent
+                .frame(width: uiState.expandedSize.width, height: uiState.expandedSize.height, alignment: .top)
+                .opacity(isExpanded ? 1 : 0)
+                .scaleEffect(isExpanded ? 1 : 0.92, anchor: .top)
+                .blur(radius: isExpanded ? 0 : 8)
+                .allowsHitTesting(isExpanded)
+                .animation(
+                    isExpanded ? .easeOut(duration: 0.28).delay(0.06) : .easeIn(duration: 0.12),
+                    value: isExpanded
+                )
+        }
+        .frame(width: islandSize.width, height: islandSize.height, alignment: .top)
+        .clipShape(shape)
+        .overlay {
+            shape
+                .stroke(
+                    LinearGradient(colors: [.clear, Theme.edge], startPoint: .top, endPoint: .bottom),
+                    lineWidth: 1
+                )
+                .opacity(isExpanded ? 1 : 0)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .clipShape(
-            UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: 24,
-                bottomTrailingRadius: 24,
-                topTrailingRadius: 0
+        .environment(\.colorScheme, .dark)
+    }
+
+    private var background: some View {
+        ZStack(alignment: .top) {
+            LinearGradient(
+                colors: [Theme.islandTop, Theme.islandBottom],
+                startPoint: .top,
+                endPoint: .bottom
             )
-        )
-        .shadow(color: .black.opacity(0.25), radius: 12, x: 0, y: 4)
-    }
-
-    private var content: some View {
-        ZStack {
-            // opacity(0) в ZStack не выключает hit-testing — скрытая вкладка сверху
-            // перехватывала клики/drop у видимой. allowsHitTesting добивает это явно.
-            tabLayer(.clipboard) { ClipboardView(store: clipboardStore) }
-            tabLayer(.files) { ShelfView(store: shelfStore) }
-            tabLayer(.translator) { TranslatorView() }
+            // Мягкое свечение цвета текущей вкладки под шапкой.
+            EllipticalGradient(
+                colors: [uiState.selectedTab.tint.opacity(0.16), .clear],
+                center: .center,
+                startRadiusFraction: 0,
+                endRadiusFraction: 0.5
+            )
+            .frame(width: 540, height: 180)
+            .offset(y: uiState.topInset - 50)
+                .opacity(isExpanded ? 1 : 0)
+                .animation(.easeInOut(duration: 0.4), value: uiState.selectedTab)
         }
-        .animation(.easeOut(duration: 0.18), value: uiState.selectedTab)
-        .padding(16)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    /// Лёгкий fade + сдвиг по Y при смене вкладки — вью не пересоздаются (все
-    /// четыре всегда в дереве), анимируются только opacity/offset.
+    private var expandedContent: some View {
+        VStack(spacing: 0) {
+            HeaderBar(
+                uiState: uiState,
+                clipboardStore: clipboardStore,
+                shelfStore: shelfStore,
+                limitsStore: limitsStore
+            )
+            .padding(.horizontal, Self.earRadius + 10)
+            .frame(height: max(uiState.topInset, 38))
+
+            ZStack {
+                tabLayer(.clipboard) { ClipboardView(store: clipboardStore, uiState: uiState) }
+                tabLayer(.files) { ShelfView(store: shelfStore) }
+                tabLayer(.translator) { TranslatorView() }
+                tabLayer(.limits) { LimitsView(store: limitsStore, tokens: tokenStore) }
+            }
+            .padding(.horizontal, Self.earRadius + 12)
+            .padding(.top, 8)
+            .padding(.bottom, 16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
+        .overlay { DropHighlight(isActive: uiState.isDropTargeted, topInset: uiState.topInset) }
+        .overlay(alignment: .bottomTrailing) {
+            ResizeHandle(uiState: uiState)
+                .padding(.trailing, Self.earRadius + 6)
+                .padding(.bottom, 6)
+        }
+    }
+
+    /// Вкладки не пересоздаются — переключение сдвигает их по горизонтали в
+    /// сторону выбранной и растворяет. opacity(0) в ZStack не выключает
+    /// hit-testing — скрытая вкладка перехватывала бы клики, отсюда allowsHitTesting.
     @ViewBuilder
     private func tabLayer<Content: View>(_ tab: PanelTab, @ViewBuilder content: () -> Content) -> some View {
-        let isSelected = uiState.selectedTab == tab
+        let selected = uiState.selectedTab
+        let isSelected = selected == tab
         content()
             .opacity(isSelected ? 1 : 0)
-            .offset(y: isSelected ? 0 : 6)
+            .offset(x: isSelected ? 0 : CGFloat(tab.index - selected.index) * 24)
+            .blur(radius: isSelected ? 0 : 6)
             .allowsHitTesting(isSelected)
+            .animation(Theme.tabSpring, value: selected)
+    }
+}
+
+/// Шапка: вкладки — в левом «ухе» выреза, счётчик и действия — в правом.
+/// На экране без выреза та же строка просто идёт первой строкой панели.
+private struct HeaderBar: View {
+    var uiState: PanelUIState
+    var clipboardStore: ClipboardStore
+    var shelfStore: ShelfStore
+    var limitsStore: LimitsStore
+
+    @Namespace private var pillNamespace
+
+    var body: some View {
+        HStack(spacing: 0) {
+            HStack(spacing: 4) {
+                ForEach(PanelTab.allCases) { tab in
+                    TabPill(tab: tab, isSelected: uiState.selectedTab == tab, namespace: pillNamespace) {
+                        withAnimation(Theme.tabSpring) { uiState.selectedTab = tab }
+                    }
+                }
+            }
+            Spacer(minLength: uiState.notchWidth + 16)
+            HStack(spacing: 6) {
+                LimitsBadge(store: limitsStore) {
+                    withAnimation(Theme.tabSpring) { uiState.selectedTab = .limits }
+                }
+                trailingInfo
+                IconButton(systemName: "gearshape", help: "Настройки  ⌘,") {
+                    uiState.onOpenSettings?()
+                }
+                IconButton(systemName: "power", hoverTint: Theme.danger, help: "Выйти из Northy") {
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var trailingInfo: some View {
+        switch uiState.selectedTab {
+        case .clipboard:
+            if !clipboardStore.history.isEmpty {
+                CountBadge(text: "\(clipboardStore.history.count)", tint: Theme.sky)
+                ConfirmClearButton { withAnimation(Theme.tabSpring) { clipboardStore.clear() } }
+            }
+        case .files:
+            if !shelfStore.files.isEmpty {
+                CountBadge(text: "\(shelfStore.files.count)", tint: Theme.amber)
+                ConfirmClearButton { withAnimation(Theme.tabSpring) { shelfStore.clear() } }
+            }
+        case .translator, .limits:
+            EmptyView()
+        }
+    }
+}
+
+/// Остаток по всем лимитам в шапке — маленькие кольца с цифрой внутри,
+/// видны на любой вкладке; клик ведёт на «Лимиты».
+private struct LimitsBadge: View {
+    var store: LimitsStore
+    let action: () -> Void
+
+    var body: some View {
+        if let windows = store.snapshot?.windows, !windows.isEmpty {
+            Button(action: action) {
+                HStack(spacing: 4) {
+                    ForEach(windows, id: \.kind) { window in
+                        UsageRing(percent: Double(window.remaining), color: window.accent, lineWidth: 2)
+                            .frame(width: 22, height: 22)
+                            .overlay {
+                                Text("\(window.remaining)")
+                                    .font(.system(size: 8.5, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                    .foregroundStyle(Theme.primaryText)
+                                    .contentTransition(.numericText())
+                            }
+                            .help("\(window.title): осталось \(window.remaining)%")
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
+private struct CountBadge: View {
+    let text: String
+    let tint: Color
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(tint)
+            .padding(.horizontal, 7)
+            .frame(height: 20)
+            .background(Capsule().fill(tint.opacity(0.14)))
+            .contentTransition(.numericText())
+            .animation(Theme.tabSpring, value: text)
+    }
+}
+
+private struct TabPill: View {
+    let tab: PanelTab
+    let isSelected: Bool
+    let namespace: Namespace.ID
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: tab.icon)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(isSelected ? tab.tint : (isHovering ? Theme.primaryText : Theme.secondaryText))
+                if isSelected {
+                    Text(tab.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(Theme.primaryText)
+                        .fixedSize()
+                        .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .leading)))
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 26)
+            .background {
+                if isSelected {
+                    Capsule()
+                        .fill(tab.tint.opacity(0.2))
+                        .matchedGeometryEffect(id: "tabPill", in: namespace)
+                } else if isHovering {
+                    Capsule().fill(Color.white.opacity(0.07))
+                }
+            }
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .help(tab.title)
+    }
+}
+
+/// Рамка «отпустите здесь» поверх всей панели, пока над ней тащат файл.
+private struct DropHighlight: View {
+    let isActive: Bool
+    let topInset: CGFloat
+
+    var body: some View {
+        ZStack {
+            if isActive {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Theme.amber.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(Theme.amber.opacity(0.7), style: StrokeStyle(lineWidth: 1.5, dash: [7, 5]))
+                    )
+                    .overlay(alignment: .bottom) {
+                        Label("Отпустите — положу на полку", systemImage: "tray.and.arrow.down.fill")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.amber)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 8)
+                            .background(Capsule().fill(Color.black.opacity(0.7)))
+                            .padding(.bottom, 14)
+                    }
+                    .padding(EdgeInsets(top: max(topInset, 38) + 4, leading: 18, bottom: 14, trailing: 18))
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
+        }
+        .animation(.easeOut(duration: 0.18), value: isActive)
+        .allowsHitTesting(false)
+    }
+}
+
+/// Уголок для растягивания панели. Смещение считается по экранным координатам
+/// мыши: окно под курсором меняет размер, и локальные координаты «плывут».
+private struct ResizeHandle: View {
+    var uiState: PanelUIState
+
+    @State private var start: (mouse: NSPoint, size: CGSize)?
+    @State private var isHovering = false
+
+    var body: some View {
+        GripShape()
+            .stroke(Color.white.opacity(isHovering || start != nil ? 0.55 : 0.22), style: StrokeStyle(lineWidth: 1.4, lineCap: .round))
+            .frame(width: 11, height: 11)
+            .frame(width: 22, height: 22)
+            .contentShape(Rectangle())
+            .onHover { isHovering = $0 }
+            .pointerStyle(.frameResize(position: .bottomTrailing))
+            .help("Потяните, чтобы изменить размер панели")
+            .gesture(
+                DragGesture(minimumDistance: 1)
+                    .onChanged { _ in
+                        let mouse = NSEvent.mouseLocation
+                        if start == nil {
+                            start = (mouse, NotchGeometry.contentSize)
+                            uiState.isResizing = true
+                        }
+                        guard let start else { return }
+                        // Панель растёт в обе стороны от выреза — ширина меняется на двойное смещение.
+                        uiState.onResize?(CGSize(
+                            width: start.size.width + 2 * (mouse.x - start.mouse.x),
+                            height: start.size.height + (start.mouse.y - mouse.y)
+                        ))
+                    }
+                    .onEnded { _ in
+                        start = nil
+                        uiState.onResizeEnded?()
+                    }
+            )
+            .animation(.easeOut(duration: 0.15), value: isHovering)
+    }
+}
+
+/// Две диагональные чёрточки — привычный вид уголка изменения размера.
+nonisolated private struct GripShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.move(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.midX, y: rect.maxY))
+        return path
     }
 }

@@ -11,4 +11,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
     }
+
+    /// Отложенные debounced-записи истории и полки — на диск немедленно,
+    /// иначе последние изменения потеряются при выходе.
+    func applicationWillTerminate(_ notification: Notification) {
+        panelController.flushStores()
+    }
 }

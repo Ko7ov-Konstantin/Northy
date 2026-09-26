@@ -9,13 +9,15 @@ import AppKit
 /// так что это не мешает получать draggingEntered/performDragOperation.
 final class DropContainerView: NSView {
     var onFileURLs: (([URL]) -> Void)?
+    /// true — над панелью тащат принимаемый файл (для подсветки зоны дропа).
+    var onTargetingChanged: ((Bool) -> Void)?
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     /// Плавающая миниатюра скриншота — не file URL, а file promise
     /// (NSFilePromiseReceiver): реальный файл появляется только после
     /// receivePromisedFiles, поэтому ему нужна постоянная папка-приёмник.
-    private let dropsDirectory = DropContainerView.makeDropsDirectory()
+    private let dropsDirectory = AppData.dropsDirectory
     private let promiseQueue = OperationQueue()
 
     override init(frame frameRect: NSRect) {
@@ -26,19 +28,6 @@ final class DropContainerView: NSView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    private static func makeDropsDirectory() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let dir = base.appendingPathComponent("Northy/Drops", isDirectory: true)
-        do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        } catch {
-            // Без этой папки file promise принять нельзя — оставляем след в логе
-            // вместо молчаливой потери дропа.
-            NSLog("[Northy] Drops directory creation failed: %@", error.localizedDescription)
-        }
-        return dir
     }
 
     private func canAcceptDrag(_ sender: NSDraggingInfo) -> Bool {
@@ -52,7 +41,17 @@ final class DropContainerView: NSView {
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
-        canAcceptDrag(sender) ? .copy : []
+        let accepts = canAcceptDrag(sender)
+        onTargetingChanged?(accepts)
+        return accepts ? .copy : []
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        onTargetingChanged?(false)
+    }
+
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        onTargetingChanged?(false)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
@@ -60,6 +59,7 @@ final class DropContainerView: NSView {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        onTargetingChanged?(false)
         let pasteboard = sender.draggingPasteboard
 
         if let urls = pasteboard.readObjects(
@@ -74,9 +74,18 @@ final class DropContainerView: NSView {
             forClasses: [NSFilePromiseReceiver.self],
             options: nil
         ) as? [NSFilePromiseReceiver], !receivers.isEmpty {
+            // Своя подпапка на drag-сессию: одинаковые имена обещанных файлов
+            // (типичный случай — скриншоты) иначе перезаписывают друг друга.
+            let sessionDirectory = dropsDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            do {
+                try FileManager.default.createDirectory(at: sessionDirectory, withIntermediateDirectories: true)
+            } catch {
+                NSLog("[Northy] drops session directory creation failed: %@", error.localizedDescription)
+                return false
+            }
             for receiver in receivers {
                 receiver.receivePromisedFiles(
-                    atDestination: dropsDirectory,
+                    atDestination: sessionDirectory,
                     options: [:],
                     operationQueue: promiseQueue
                 ) { [weak self] url, error in

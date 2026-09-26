@@ -6,6 +6,8 @@ cd "$(dirname "$0")/.."
 pkill -x Northy || true
 
 swift build -c release
+# Путь бинаря зависит от бэкенда сборки — симлинк .build/release может быть устаревшим.
+BIN_DIR="$(swift build -c release --show-bin-path)"
 
 APP="Northy.app"
 CONTENTS="$APP/Contents"
@@ -55,9 +57,9 @@ cat > "$CONTENTS/Info.plist" <<'EOF'
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.2.0</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>LSUIElement</key>
 	<true/>
 	<key>LSMinimumSystemVersion</key>
@@ -70,9 +72,25 @@ EOF
 
 plutil -lint "$CONTENTS/Info.plist"
 
-cp .build/release/Northy "$MACOS/Northy"
+cp "$BIN_DIR/Northy" "$MACOS/Northy"
 cp "$ICNS" "$RESOURCES/Northy.icns"
+
+# Расширение Finder («Отправить в Northy» / «Вставить из Northy»). SwiftPM
+# расширения не собирает — отдельный swiftc с точкой входа NSExtensionMain.
+# Подписывается до приложения: подпись .app запечатывает вложенный .appex.
+EXT_SRC="Extensions/NorthyFinder"
+EXT="$CONTENTS/PlugIns/NorthyFinder.appex"
+mkdir -p "$EXT/Contents/MacOS"
+xcrun swiftc -O -swift-version 5 -module-name NorthyFinder -parse-as-library -application-extension \
+	-target arm64-apple-macos26.0 -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
+	-framework FinderSync -framework Cocoa \
+	-Xlinker -e -Xlinker _NSExtensionMain \
+	"$EXT_SRC/FinderSync.swift" -o "$EXT/Contents/MacOS/NorthyFinder"
+cp "$EXT_SRC/Info.plist" "$EXT/Contents/Info.plist"
+plutil -lint "$EXT/Contents/Info.plist"
+codesign --force --sign - --entitlements "$EXT_SRC/NorthyFinder.entitlements" "$EXT"
 
 codesign --force --sign - "$APP"
 
 echo "Собрано: $APP"
+echo "Расширение Finder включается один раз: Системные настройки → Основные → Объекты входа и расширения → Finder"

@@ -7,6 +7,15 @@ enum SourceLanguage: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Циклическое переключение кнопкой: Авто → RU → EN → Авто.
+    var next: SourceLanguage {
+        switch self {
+        case .auto: .ru
+        case .ru: .en
+        case .en: .auto
+        }
+    }
+
     var locale: Locale.Language? {
         switch self {
         case .auto: nil
@@ -22,6 +31,10 @@ enum TargetLanguage: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    var next: TargetLanguage {
+        self == .ru ? .en : .ru
+    }
+
     var locale: Locale.Language {
         switch self {
         case .ru: Locale.Language(identifier: "ru")
@@ -32,4 +45,15 @@ enum TargetLanguage: String, CaseIterable, Identifiable {
     var asSource: SourceLanguage {
         self == .ru ? .ru : .en
     }
+}
+
+/// Перестановка языков местами. «Авто» не может стать целью: текущая цель
+/// занимает место источника, новой целью становится противоположный язык.
+/// Явная пара просто меняется местами.
+func swapped(source: SourceLanguage, target: TargetLanguage) -> (source: SourceLanguage, target: TargetLanguage) {
+    let newSource = target.asSource
+    let newTarget: TargetLanguage = source.locale == nil
+        ? target.next
+        : (source == .ru ? .ru : .en)
+    return (newSource, newTarget)
 }

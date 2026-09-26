@@ -7,6 +7,10 @@ final class NotchPanel: NSPanel {
     /// Escape сворачивает панель. performKeyEquivalent приходит, только пока
     /// панель ключевая — развёрнутая через hover панель как раз ключ (expand → makeKey).
     var onEscape: (() -> Void)?
+    /// ⌘1…⌘9 — номер вкладки (с единицы), ⌘F — поиск в буфере.
+    var onTabShortcut: ((Int) -> Void)?
+    var onFind: (() -> Void)?
+    var onSettings: (() -> Void)?
 
     init(contentRect: CGRect) {
         super.init(
@@ -31,10 +35,36 @@ final class NotchPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
 
+    /// Ключевым окно становится по явному клику, до диспетчеризации события:
+    /// наведение (hover-разворот) фокус ввода у активного приложения не крадёт.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, !isKeyWindow {
+            makeKey()
+        }
+        super.sendEvent(event)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.keyCode == 53, let onEscape {
             onEscape()
             return true
+        }
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if modifiers == .command, let characters = event.charactersIgnoringModifiers {
+            if let number = Int(characters), (1...9).contains(number), let onTabShortcut {
+                onTabShortcut(number)
+                return true
+            }
+            // keyCode 3 — клавиша F на любой раскладке (в русской это «А»).
+            if event.keyCode == 3, let onFind {
+                onFind()
+                return true
+            }
+            // keyCode 43 — запятая (⌘, — настройки, как в любом приложении Mac).
+            if event.keyCode == 43, let onSettings {
+                onSettings()
+                return true
+            }
         }
         return super.performKeyEquivalent(with: event)
     }
