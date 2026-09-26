@@ -34,7 +34,7 @@ struct SettingsTests {
 
     @Test func settingsDefaultsAndPersistence() throws {
         let (defaults, suite) = try isolatedDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { discardDefaults(defaults, suite: suite) }
 
         let settings = AppSettings(defaults: defaults)
         #expect(settings.hotKey == .optionSpace)
@@ -66,7 +66,7 @@ struct SettingsTests {
     /// Панель открывается там, где её оставили, — и после перезапуска.
     @Test func lastTabIsRemembered() throws {
         let (defaults, suite) = try isolatedDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { discardDefaults(defaults, suite: suite) }
         #expect(PanelTab.stored(in: defaults) == .clipboard, "первый запуск — «Буфер»")
         PanelTab.translator.store(in: defaults)
         #expect(PanelTab.stored(in: defaults) == .translator)
@@ -78,7 +78,7 @@ struct SettingsTests {
 
     @Test func tabsCanBeDisabledButClipboardStays() throws {
         let (defaults, suite) = try isolatedDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { discardDefaults(defaults, suite: suite) }
         let settings = AppSettings(defaults: defaults)
         #expect(settings.enabledTabs == [.clipboard], "по умолчанию — только буфер")
 
@@ -99,7 +99,7 @@ struct SettingsTests {
 
     @Test func pinLimitDefaultsToFiveAndPersists() throws {
         let (defaults, suite) = try isolatedDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { discardDefaults(defaults, suite: suite) }
         #expect(AppSettings(defaults: defaults).pinLimit == 5)
         AppSettings(defaults: defaults).pinLimit = 10
         #expect(AppSettings(defaults: defaults).pinLimit == 10)
@@ -110,9 +110,18 @@ struct SettingsTests {
 
     @Test func clipboardLimitIsOneOfTheOffered() throws {
         let (defaults, suite) = try isolatedDefaults()
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { discardDefaults(defaults, suite: suite) }
         defaults.set(7, forKey: "clipboard.limit")
         #expect(AppSettings(defaults: defaults).clipboardLimit == 100, "мусор в настройках — значение по умолчанию")
         #expect(AppSettings.clipboardLimits == [50, 100, 300, 1000])
     }
+}
+
+/// removePersistentDomain очищает значения, но файл набора остаётся в
+/// ~/Library/Preferences — за прогоны их копились сотни. Удаляем и его.
+func discardDefaults(_ defaults: UserDefaults, suite: String) {
+    defaults.removePersistentDomain(forName: suite)
+    let file = FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Preferences/\(suite).plist")
+    try? FileManager.default.removeItem(at: file)
 }

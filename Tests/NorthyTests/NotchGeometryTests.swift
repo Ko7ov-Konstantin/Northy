@@ -73,7 +73,7 @@ struct NotchGeometryTests {
     @Test func contentSizePersistsInDefaults() throws {
         let suite = "NorthyTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        defer { discardDefaults(defaults, suite: suite) }
         #expect(NotchGeometry.storedContentSize(in: defaults) == NotchGeometry.expandedContentSize, "по умолчанию — прежний размер")
         NotchGeometry.storeContentSize(CGSize(width: 820, height: 460), in: defaults)
         #expect(NotchGeometry.storedContentSize(in: defaults) == CGSize(width: 820, height: 460))
