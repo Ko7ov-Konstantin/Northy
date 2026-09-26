@@ -25,6 +25,15 @@ final class AppSettings {
         didSet { defaults.set(clipboardLimit, forKey: Keys.clipboardLimit) }
     }
 
+    /// Какие вкладки показывать; «Буфер» включён всегда.
+    var enabledTabs: Set<PanelTab> {
+        didSet {
+            if !enabledTabs.contains(.clipboard) { enabledTabs.insert(.clipboard) }
+            let saved = enabledTabs.union([.clipboard])
+            defaults.set(PanelTab.allCases.filter(saved.contains).map(\.rawValue), forKey: Keys.enabledTabs)
+        }
+    }
+
     /// Почему сочетание не назначилось (занято и т. п.); nil — всё в порядке. Не сохраняется.
     var hotKeyProblem: String?
 
@@ -32,6 +41,7 @@ final class AppSettings {
         static let hotKey = "hotkey.preset"
         static let openOnHover = "panel.openOnHover"
         static let clipboardLimit = "clipboard.limit"
+        static let enabledTabs = "panel.enabledTabs"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -40,5 +50,10 @@ final class AppSettings {
         openOnHover = defaults.object(forKey: Keys.openOnHover) as? Bool ?? true
         let limit = defaults.integer(forKey: Keys.clipboardLimit)
         clipboardLimit = Self.clipboardLimits.contains(limit) ? limit : 100
+        if let stored = defaults.stringArray(forKey: Keys.enabledTabs) {
+            enabledTabs = Set(stored.compactMap(PanelTab.init(rawValue:))).union([.clipboard])
+        } else {
+            enabledTabs = Set(PanelTab.allCases)
+        }
     }
 }

@@ -36,6 +36,16 @@ enum PanelTab: String, CaseIterable, Identifiable, Hashable {
     }
 
     var index: Int { Self.allCases.firstIndex(of: self) ?? 0 }
+
+    /// Включённые вкладки в обычном порядке.
+    static func visible(enabled: Set<PanelTab>) -> [PanelTab] {
+        allCases.filter { enabled.contains($0) }
+    }
+
+    /// Выключенную вкладку не открываем — вместо неё «Буфер».
+    static func resolve(_ tab: PanelTab, enabled: Set<PanelTab>) -> PanelTab {
+        enabled.contains(tab) ? tab : .clipboard
+    }
 }
 
 /// Корень панели — тёмный «остров», вырастающий из выреза. Окно уже имеет
@@ -128,9 +138,16 @@ struct PanelRootView: View {
 
             ZStack {
                 tabLayer(.clipboard) { ClipboardView(store: clipboardStore, uiState: uiState) }
-                tabLayer(.files) { ShelfView(store: shelfStore) }
-                tabLayer(.translator) { TranslatorView() }
-                tabLayer(.limits) { LimitsView(store: limitsStore, tokens: tokenStore) }
+                // Выключенные в настройках вкладки не строятся вовсе.
+                if uiState.enabledTabs.contains(.files) {
+                    tabLayer(.files) { ShelfView(store: shelfStore) }
+                }
+                if uiState.enabledTabs.contains(.translator) {
+                    tabLayer(.translator) { TranslatorView() }
+                }
+                if uiState.enabledTabs.contains(.limits) {
+                    tabLayer(.limits) { LimitsView(store: limitsStore, tokens: tokenStore) }
+                }
             }
             .padding(.horizontal, Self.earRadius + 12)
             .padding(.top, 8)
@@ -176,7 +193,7 @@ private struct HeaderBar: View {
     var body: some View {
         HStack(spacing: 0) {
             HStack(spacing: 4) {
-                ForEach(PanelTab.allCases) { tab in
+                ForEach(PanelTab.visible(enabled: uiState.enabledTabs)) { tab in
                     TabPill(tab: tab, isSelected: uiState.selectedTab == tab, namespace: pillNamespace) {
                         withAnimation(Theme.tabSpring) { uiState.selectedTab = tab }
                     }
@@ -184,8 +201,10 @@ private struct HeaderBar: View {
             }
             Spacer(minLength: uiState.notchWidth + 16)
             HStack(spacing: 6) {
-                LimitsBadge(store: limitsStore) {
-                    withAnimation(Theme.tabSpring) { uiState.selectedTab = .limits }
+                if uiState.enabledTabs.contains(.limits) {
+                    LimitsBadge(store: limitsStore) {
+                        withAnimation(Theme.tabSpring) { uiState.selectedTab = .limits }
+                    }
                 }
                 trailingInfo
                 IconButton(systemName: "gearshape", help: "Настройки  ⌘,") {

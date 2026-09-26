@@ -30,7 +30,11 @@ final class DropContainerView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    /// false — вкладка «Файлы» выключена в настройках, файлы не принимаем.
+    var acceptsDrops: () -> Bool = { true }
+
     private func canAcceptDrag(_ sender: NSDraggingInfo) -> Bool {
+        guard acceptsDrops() else { return false }
         let pasteboard = sender.draggingPasteboard
         let hasFileURL = pasteboard.canReadObject(
             forClasses: [NSURL.self],

@@ -23,6 +23,8 @@ final class PanelUIState {
     var isDropTargeted = false
     /// Панель растягивают за уголок — сворачивать её в этот момент нельзя.
     var isResizing = false
+    /// Включённые вкладки (из настроек); «Буфер» — всегда.
+    var enabledTabs: Set<PanelTab> = Set(PanelTab.allCases)
     /// Поиск во вкладке «Буфер»; Escape сначала очищает его, потом сворачивает панель.
     var clipboardQuery = ""
     /// Меняется по ⌘F — вкладка «Буфер» ставит фокус в поле поиска.
@@ -85,6 +87,9 @@ final class PanelController: NSObject {
     private var panel: NotchPanel!
     private var hostingView: NSView!
     private var limitsCard: NSView?
+    /// Пункты меню статус-бара, относящиеся к лимитам Claude.
+    private var limitsMenuItems: [NSMenuItem] = []
+    private var limitsEnabled: Bool { settings.enabledTabs.contains(.limits) }
     let uiState = PanelUIState()
     let clipboardStore = ClipboardStore()
     let shelfStore = ShelfStore()
@@ -128,8 +133,10 @@ final class PanelController: NSObject {
         panel.appearance = NSAppearance(named: .darkAqua)
         panel.onEscape = { [weak self] in self?.handleEscape() }
         panel.onTabShortcut = { [weak self] number in
-            guard let self, number <= PanelTab.allCases.count else { return }
-            withAnimation(Theme.tabSpring) { self.uiState.selectedTab = PanelTab.allCases[number - 1] }
+            guard let self else { return }
+            let tabs = PanelTab.visible(enabled: self.uiState.enabledTabs)
+            guard number <= tabs.count else { return }
+            withAnimation(Theme.tabSpring) { self.uiState.selectedTab = tabs[number - 1] }
         }
         panel.onSettings = { [weak self] in self?.openSettings() }
         panel.onFind = { [weak self] in
@@ -166,6 +173,7 @@ final class PanelController: NSObject {
 
         let dropOverlay = DropContainerView(frame: rootContainer.bounds)
         dropOverlay.autoresizingMask = [.width, .height]
+        dropOverlay.acceptsDrops = { [weak self] in self?.filesEnabled ?? false }
         dropOverlay.onFileURLs = { [weak self] urls in
             withAnimation(Theme.tabSpring) {
                 self?.shelfStore.add(urls)
@@ -217,6 +225,7 @@ final class PanelController: NSObject {
         hotKey.onPress = { [weak self] in self?.toggleFromHotKey() }
         observeHotKeySetting()
         observeClipboardLimit()
+        observeEnabledTabs()
         startFinderBridge()
     }
 
@@ -295,6 +304,11 @@ final class PanelController: NSObject {
         quitItem.image = NSImage(systemSymbolName: "xmark.square", accessibilityDescription: nil)
         menu.addItem(quitItem)
         item.menu = menu
+        // Всё, кроме «Показать панель», «Настройки…» и «Выход», — модуль лимитов:
+        // при выключенной вкладке «Лимиты» эти пункты скрываются.
+        let separatorBeforeSettings = menu.items[menu.index(of: settingsItem) - 1]
+        let general: Set<NSMenuItem> = [showItem, separatorBeforeSettings, settingsItem, quitItem]
+        limitsMenuItems = menu.items.filter { !general.contains($0) }
 
         statusItem = item
         observeLimits()
@@ -303,7 +317,9 @@ final class PanelController: NSObject {
     /// Значок в строке меню — следом за LimitsStore.
     private func observeLimits() {
         withObservationTracking {
-            updateStatusButton(lines: limitsStore.snapshot?.statusBarLines ?? [])
+            let enabled = limitsEnabled
+            updateStatusButton(lines: enabled ? (limitsStore.snapshot?.statusBarLines ?? []) : [])
+            limitsMenuItems.forEach { $0.isHidden = !enabled }
             // Высота карточки меняется вместе с данными (строки лимитов, ошибка, загрузка).
             _ = limitsStore.errorMessage
             _ = limitsStore.isLoading
@@ -337,10 +353,9 @@ final class PanelController: NSObject {
     /// Иконка и строки остатка друг под другом (как у CodexBar). Шаблонная
     /// картинка — цвет подстраивается под светлую и тёмную строку меню.
     private static func statusImage(lines: [String]) -> NSImage? {
-        let icon = NSImage(systemSymbolName: "sparkle.rectangle.tophalf.inset.filled", accessibilityDescription: "Northy")
-        guard !lines.isEmpty else { return icon }
+        guard !lines.isEmpty else { return NorthyIcon.menuBarImage() }
 
-        let symbol = icon?.withSymbolConfiguration(.init(pointSize: 11, weight: .semibold))
+        let symbol: NSImage? = NorthyIcon.menuBarImage(size: 14)
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .semibold),
             .foregroundColor: NSColor.black,
@@ -478,6 +493,8 @@ final class PanelController: NSObject {
     /// Лимиты, токены по логам и статус сервисов. force — мимо минутного
     /// ограничения сканера логов (кнопка «Обновить»).
     private func refreshEverything(force: Bool) {
+        // Модуль выключен — ни claude.ai, ни сканирования логов, ни статуса.
+        guard limitsEnabled else { return }
         Task { await limitsStore.refresh(force: true) }
         Task { await tokenStore.refresh(force: force) }
         refreshStatusPage()
@@ -485,6 +502,7 @@ final class PanelController: NSObject {
 
     /// Лимиты обновляются только по открытию панели или меню, без фонового опроса.
     private func refreshLimits() {
+        guard uiState.enabledTabs.contains(.limits) else { return }
         Task { await limitsStore.refresh() }
         Task { await tokenStore.refresh() }
     }
@@ -510,7 +528,7 @@ final class PanelController: NSObject {
             return
         }
 
-        guard !uiState.isExpanded else { return }
+        guard !uiState.isExpanded, filesEnabled else { return }
         guard NSEvent.pressedMouseButtons & 1 != 0 else { return }
         guard NotchGeometry.collapsedFrame().contains(NSEvent.mouseLocation) else { return }
 
@@ -615,6 +633,7 @@ final class PanelController: NSObject {
 
     /// Файл отправлен из Finder — полка на пару секунд показывает, что он на месте.
     private func showShelfBriefly() {
+        guard filesEnabled else { return }
         let wasExpanded = uiState.isExpanded
         if !wasExpanded {
             panel.orderFrontRegardless()
@@ -627,6 +646,22 @@ final class PanelController: NSObject {
             self.collapse()
         }
     }
+
+    /// Вкладки из настроек; открытая, но выключенная вкладка сменяется «Буфером».
+    private func observeEnabledTabs() {
+        let enabled = withObservationTracking {
+            settings.enabledTabs
+        } onChange: { [weak self] in
+            DispatchQueue.main.async { self?.observeEnabledTabs() }
+        }
+        uiState.enabledTabs = enabled
+        let resolved = PanelTab.resolve(uiState.selectedTab, enabled: enabled)
+        if resolved != uiState.selectedTab {
+            withAnimation(Theme.tabSpring) { uiState.selectedTab = resolved }
+        }
+    }
+
+    private var filesEnabled: Bool { uiState.enabledTabs.contains(.files) }
 
     /// Клавиша — явное действие: панель раскрывается и берёт фокус ввода
     /// (как «Показать панель» из меню); повторное нажатие сворачивает.
@@ -655,6 +690,7 @@ final class PanelController: NSObject {
     /// Тот же путь, что при hover, плюс переключение на вкладку «Файлы» —
     /// чтобы перетащенный файл сразу стало видно на полке.
     private func handleDragEntered() {
+        guard filesEnabled else { return }
         collapseWorkItem?.cancel()
         collapseWorkItem = nil
         expandWorkItem?.cancel()

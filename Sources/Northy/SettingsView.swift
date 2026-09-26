@@ -30,7 +30,24 @@ struct SettingsView: View {
                         .font(.callout)
                 }
                 Toggle("Открывать при наведении на вырез", isOn: $settings.openOnHover)
-                Text("Панель можно растянуть за уголок справа снизу. ⌘1–⌘4 — вкладки, ⌘F — поиск в буфере, Esc — свернуть.")
+                Text("Панель можно растянуть за уголок справа снизу. ⌘1–⌘4 — вкладки по порядку, ⌘F — поиск в буфере, Esc — свернуть.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Вкладки") {
+                ForEach(PanelTab.allCases) { tab in
+                    Toggle(isOn: Binding(
+                        get: { settings.enabledTabs.contains(tab) },
+                        set: { isOn in
+                            if isOn { settings.enabledTabs.insert(tab) } else { settings.enabledTabs.remove(tab) }
+                        }
+                    )) {
+                        Label(tab.title, systemImage: tab.icon)
+                    }
+                    .disabled(tab == .clipboard)
+                }
+                Text("«Буфер» включён всегда. Без «Лимитов» кольца пропадают из шапки, в строке меню лимиты остаются.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

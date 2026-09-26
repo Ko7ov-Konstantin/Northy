@@ -74,6 +74,29 @@ struct SettingsTests {
         #expect(PanelTab.stored(in: defaults) == .clipboard)
     }
 
+    // MARK: вкладки
+
+    @Test func tabsCanBeDisabledButClipboardStays() throws {
+        let (defaults, suite) = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.enabledTabs == Set(PanelTab.allCases), "по умолчанию включены все")
+
+        settings.enabledTabs = [.translator]
+        #expect(settings.enabledTabs == [.clipboard, .translator], "буфер нельзя выключить")
+        #expect(AppSettings(defaults: defaults).enabledTabs == [.clipboard, .translator], "переживает перезапуск")
+
+        defaults.set(["files", "мусор"], forKey: "panel.enabledTabs")
+        #expect(AppSettings(defaults: defaults).enabledTabs == [.clipboard, .files])
+    }
+
+    @Test func visibleTabsKeepOrderAndFallBackToClipboard() {
+        let enabled: Set<PanelTab> = [.limits, .clipboard, .translator]
+        #expect(PanelTab.visible(enabled: enabled) == [.clipboard, .translator, .limits])
+        #expect(PanelTab.resolve(.translator, enabled: enabled) == .translator)
+        #expect(PanelTab.resolve(.files, enabled: enabled) == .clipboard, "выключенная вкладка — на «Буфер»")
+    }
+
     @Test func clipboardLimitIsOneOfTheOffered() throws {
         let (defaults, suite) = try isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
