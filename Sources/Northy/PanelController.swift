@@ -785,6 +785,16 @@ final class PanelController: NSObject {
         // первом реальном показе — повторяем снятие регистрации на всякий случай.
         hostingView.unregisterDraggedTypesRecursively()
         refreshLimits()
+        warmUpTextRecognition()
+    }
+
+    /// Модель распознавания текста грузится заранее, пока пользователь смотрит панель.
+    private var lastTextWarmUp: Date?
+    private func warmUpTextRecognition() {
+        let hasImages = clipboardStore.history.contains { if case .image = $0.content { true } else { false } }
+        guard TextRecognition.shouldWarmUp(hasImages: hasImages, lastWarmUp: lastTextWarmUp) else { return }
+        lastTextWarmUp = .now
+        Task(priority: .utility) { await TextRecognition.warmUp() }
     }
 
     private func handleEscape() {

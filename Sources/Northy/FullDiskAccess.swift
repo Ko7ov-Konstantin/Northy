@@ -27,12 +27,23 @@ nonisolated enum FullDiskAccess {
                 try open(url)
                 return .granted
             } catch let error as NSError {
-                let noPermission = (error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoPermissionError)
-                    || (error.domain == NSPOSIXErrorDomain && (error.code == Int(EPERM) || error.code == Int(EACCES)))
-                if noPermission { denied = true }
+                if isPermissionError(error) { denied = true }
             }
         }
         return denied ? .denied : .unknown
+    }
+
+    /// Без доступа FileHandle отвечает 513 («нет прав на запись») с вложенным EPERM,
+    /// Data(contentsOf:) — 257; смотрим и на сам код, и на вложенную POSIX-ошибку.
+    private static func isPermissionError(_ error: NSError) -> Bool {
+        if error.domain == NSCocoaErrorDomain,
+           [NSFileReadNoPermissionError, NSFileWriteNoPermissionError].contains(error.code) {
+            return true
+        }
+        if error.domain == NSPOSIXErrorDomain, [Int(EPERM), Int(EACCES)].contains(error.code) {
+            return true
+        }
+        return (error.userInfo[NSUnderlyingErrorKey] as? NSError).map(isPermissionError) ?? false
     }
 }
 

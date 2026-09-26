@@ -48,4 +48,20 @@ struct TextRecognitionTests {
             try await TextRecognition.recognizeText(at: url)
         }
     }
+
+    /// Прогрев: служебная картинка с текстом, чтобы Vision загрузил модель распознавания.
+    @Test func warmUpImageHasTextForVision() async throws {
+        let image = try #require(TextRecognition.warmUpImage())
+        #expect(image.width >= 200 && image.height >= 40)
+        await TextRecognition.warmUp()
+    }
+
+    /// Прогрев не чаще раза в 15 минут и только если в истории есть картинки.
+    @Test func warmUpIsThrottled() {
+        let now = Date()
+        #expect(TextRecognition.shouldWarmUp(hasImages: true, lastWarmUp: nil, now: now))
+        #expect(!TextRecognition.shouldWarmUp(hasImages: false, lastWarmUp: nil, now: now))
+        #expect(!TextRecognition.shouldWarmUp(hasImages: true, lastWarmUp: now.addingTimeInterval(-60), now: now))
+        #expect(TextRecognition.shouldWarmUp(hasImages: true, lastWarmUp: now.addingTimeInterval(-16 * 60), now: now))
+    }
 }

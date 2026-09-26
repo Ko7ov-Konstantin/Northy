@@ -27,6 +27,18 @@ struct FullDiskAccessTests {
         #expect(status == .denied)
     }
 
+    /// Так отвечает FileHandle на файл Safari без доступа: 513 с вложенным EPERM.
+    @Test func fileHandleErrorWithUnderlyingEPERMMeansDenied() {
+        let status = FullDiskAccess.status(probing: files) { url in
+            if url.path == "/a" {
+                throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError,
+                              userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM))])
+            }
+            throw missing()
+        }
+        #expect(status == .denied)
+    }
+
     /// Нет ни одного файла (Safari не запускали) — судить не по чему, не пристаём.
     @Test func nothingToProbeIsUnknown() {
         let status = FullDiskAccess.status(probing: files) { _ in throw missing() }

@@ -203,6 +203,16 @@ struct ClipboardView: View {
     private func recognize(_ entry: ClipboardStore.Entry) {
         guard let url = imageURL(for: entry), recognizingID == nil else { return }
         recognizingID = entry.id
+        withAnimation(Theme.tabSpring) { notice = (entry.id, "Распознаю текст…", Theme.sky) }
+        // Долго — значит, macOS грузит модель (после простоя или перезагрузки): говорим об этом.
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if recognizingID == entry.id {
+                withAnimation(Theme.tabSpring) {
+                    notice = (entry.id, "macOS загружает модель распознавания — первый раз до 30 с", Theme.sky)
+                }
+            }
+        }
         Task {
             let message: String
             do {
