@@ -6,6 +6,17 @@ enum PanelTab: String, CaseIterable, Identifiable, Hashable {
 
     var id: Self { self }
 
+    private static let storageKey = "panel.selectedTab"
+
+    /// Последняя открытая вкладка; первый запуск или мусор в настройках — «Буфер».
+    static func stored(in defaults: UserDefaults = .standard) -> PanelTab {
+        defaults.string(forKey: storageKey).flatMap(PanelTab.init(rawValue:)) ?? .clipboard
+    }
+
+    func store(in defaults: UserDefaults = .standard) {
+        defaults.set(rawValue, forKey: Self.storageKey)
+    }
+
     var title: String {
         switch self {
         case .clipboard: "Буфер"

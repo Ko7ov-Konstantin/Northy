@@ -7,8 +7,11 @@ import SwiftUI
 @Observable
 final class PanelUIState {
     var isExpanded = false
-    /// Каждое раскрытие панели начинается с «Буфера» (перетаскивание файла — с «Файлов»).
-    var selectedTab: PanelTab = .clipboard
+    /// Панель открывается на последней вкладке — и после перезапуска
+    /// (перетаскивание файла к вырезу открывает «Файлы»).
+    var selectedTab: PanelTab = PanelTab.stored() {
+        didSet { selectedTab.store() }
+    }
     /// Высота выреза — отступ сверху, ниже которого начинается читаемый контент.
     var topInset: CGFloat = 0
     /// Ширина выреза — промежуток в шапке между вкладками и действиями.
@@ -670,7 +673,6 @@ final class PanelController: NSObject {
         // Раскладка под новый размер окна — сразу и без анимации: иначе SwiftUI
         // берёт старую позицию (левый угол маленького окна) за старт роста.
         panel.setFrame(NotchGeometry.expandedFrame(), display: true)
-        uiState.selectedTab = .clipboard
         hostingView.layoutSubtreeIfNeeded()
         expandGeneration += 1
         let generation = expandGeneration

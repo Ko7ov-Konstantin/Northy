@@ -63,6 +63,17 @@ struct SettingsTests {
         #expect(!LaunchAtLogin.State.disabled.isOn)
     }
 
+    /// Панель открывается там, где её оставили, — и после перезапуска.
+    @Test func lastTabIsRemembered() throws {
+        let (defaults, suite) = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(PanelTab.stored(in: defaults) == .clipboard, "первый запуск — «Буфер»")
+        PanelTab.translator.store(in: defaults)
+        #expect(PanelTab.stored(in: defaults) == .translator)
+        defaults.set("мусор", forKey: "panel.selectedTab")
+        #expect(PanelTab.stored(in: defaults) == .clipboard)
+    }
+
     @Test func clipboardLimitIsOneOfTheOffered() throws {
         let (defaults, suite) = try isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
