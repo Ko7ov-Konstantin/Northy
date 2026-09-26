@@ -53,7 +53,8 @@ final class AppSettings {
         if let stored = defaults.stringArray(forKey: Keys.enabledTabs) {
             enabledTabs = Set(stored.compactMap(PanelTab.init(rawValue:))).union([.clipboard])
         } else {
-            enabledTabs = Set(PanelTab.allCases)
+            // По умолчанию — только «Буфер»; остальное включается в настройках.
+            enabledTabs = [.clipboard]
         }
     }
 }

@@ -80,7 +80,7 @@ struct SettingsTests {
         let (defaults, suite) = try isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = AppSettings(defaults: defaults)
-        #expect(settings.enabledTabs == Set(PanelTab.allCases), "по умолчанию включены все")
+        #expect(settings.enabledTabs == [.clipboard], "по умолчанию — только буфер")
 
         settings.enabledTabs = [.translator]
         #expect(settings.enabledTabs == [.clipboard, .translator], "буфер нельзя выключить")

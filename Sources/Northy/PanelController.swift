@@ -24,7 +24,7 @@ final class PanelUIState {
     /// Панель растягивают за уголок — сворачивать её в этот момент нельзя.
     var isResizing = false
     /// Включённые вкладки (из настроек); «Буфер» — всегда.
-    var enabledTabs: Set<PanelTab> = Set(PanelTab.allCases)
+    var enabledTabs: Set<PanelTab> = [.clipboard]
     /// Поиск во вкладке «Буфер»; Escape сначала очищает его, потом сворачивает панель.
     var clipboardQuery = ""
     /// Меняется по ⌘F — вкладка «Буфер» ставит фокус в поле поиска.
