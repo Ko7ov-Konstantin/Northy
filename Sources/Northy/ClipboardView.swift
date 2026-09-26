@@ -66,6 +66,7 @@ struct ClipboardView: View {
                             .foregroundStyle(Theme.tertiaryText)
                     }
                     .buttonStyle(.plain)
+                    .pointerStyle(.link)
                 }
             }
             .padding(.horizontal, 10)
@@ -85,6 +86,7 @@ struct ClipboardView: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .pointerStyle(.link)
                 }
             }
             .padding(2)
@@ -269,6 +271,7 @@ private struct ClipboardRow: View {
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onHover { isHovering = $0 }
         .onTapGesture(perform: onTap)
+        .pointerStyle(.link)
         .animation(.easeOut(duration: 0.15), value: isHovering)
         .help("Нажмите, чтобы скопировать")
     }

@@ -100,6 +100,7 @@ struct IconButton: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
         .onHover { isHovering = $0 }
         .animation(.easeOut(duration: 0.15), value: isHovering)
         .help(help)
@@ -131,6 +132,7 @@ struct ConfirmClearButton: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .transition(.scale(scale: 0.8).combined(with: .opacity))
             } else {
                 IconButton(systemName: "trash", hoverTint: Theme.danger, help: "Очистить") {

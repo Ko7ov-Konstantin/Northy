@@ -117,6 +117,7 @@ struct TranslatorView: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .pointerStyle(.link)
                     .help("Заменить текст содержимым буфера обмена")
                     .animation(Theme.tabSpring, value: pasteFeedback)
                 }
@@ -168,6 +169,7 @@ struct TranslatorView: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .pointerStyle(.link)
                 .padding(6)
                 .animation(Theme.tabSpring, value: isResultCopied)
             }
@@ -196,6 +198,7 @@ struct TranslatorView: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
+            .pointerStyle(.link)
             .help("Поменять языки местами")
 
             languagePill(targetLanguage.rawValue) { cycleTarget() }
@@ -228,6 +231,7 @@ struct TranslatorView: View {
             .animation(.easeOut(duration: 0.15), value: title)
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
     }
 
     private func cycleSource() {

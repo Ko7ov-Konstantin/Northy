@@ -99,6 +99,7 @@ private struct ShelfTile: View {
                     }
                     ShareButton(url: url)
                         .frame(width: 20, height: 20)
+                        .pointerStyle(.link)
                     IconButton(systemName: "doc.on.doc", size: 20, help: "Скопировать путь") {
                         FileActions.copyPath(url)
                     }

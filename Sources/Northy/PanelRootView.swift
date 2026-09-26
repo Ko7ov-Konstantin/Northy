@@ -230,6 +230,7 @@ private struct LimitsBadge: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .pointerStyle(.link)
         }
     }
 }
@@ -287,6 +288,7 @@ private struct TabPill: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .pointerStyle(.link)
         .onHover { isHovering = $0 }
         .help(tab.title)
     }
