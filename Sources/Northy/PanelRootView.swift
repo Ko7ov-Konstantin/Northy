@@ -162,6 +162,8 @@ struct PanelRootView: View {
                 .padding(.trailing, Self.earRadius + 5)
                 .padding(.bottom, 1)
         }
+        // Свернули под неподвижным курсором — onHover(false) может не прийти.
+        .environment(\.hoverGlowEnabled, isExpanded)
     }
 
     /// Вкладки не пересоздаются — переключение сдвигает их по горизонтали в
@@ -177,6 +179,7 @@ struct PanelRootView: View {
             .blur(radius: isSelected ? 0 : 6)
             .allowsHitTesting(isSelected)
             .animation(Theme.tabSpring, value: selected)
+            .environment(\.hoverGlowEnabled, isSelected && isExpanded)
     }
 }
 
@@ -242,11 +245,17 @@ private struct LimitsBadge: View {
     var store: LimitsStore
     let action: () -> Void
 
+    @State private var isHovering = false
+    @Environment(\.hoverGlowEnabled) private var glowEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var lit: Bool { isHovering && glowEnabled }
+
     var body: some View {
         if let windows = store.snapshot?.windows, !windows.isEmpty {
             Button(action: action) {
                 HStack(spacing: 4) {
-                    ForEach(windows, id: \.kind) { window in
+                    ForEach(Array(windows.enumerated()), id: \.element.kind) { index, window in
                         UsageRing(percent: Double(window.remaining), color: window.accent, lineWidth: 2)
                             .frame(width: 22, height: 22)
                             .overlay {
@@ -256,14 +265,36 @@ private struct LimitsBadge: View {
                                     .foregroundStyle(Theme.primaryText)
                                     .contentTransition(.numericText())
                             }
+                            // Каждое кольцо светится своим цветом, волной слева направо.
+                            .background {
+                                if lit {
+                                    Circle().fill(window.accent.opacity(0.32)).blur(radius: 4)
+                                }
+                            }
+                            .animation(ringAnimation(index)) {
+                                $0.scaleEffect(lit && !reduceMotion ? 1.08 : 1)
+                            }
                             .help("\(window.title): осталось \(window.remaining)%")
                     }
                 }
+                .background {
+                    if lit {
+                        Capsule().fill(Color.white.opacity(0.06)).padding(-3)
+                    }
+                }
+                .animation(reduceMotion ? Hover.reduced : Hover.fade, value: lit)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
             .pointerStyle(.link)
+            .onHover { isHovering = $0 }
+            .onChange(of: glowEnabled) { _, on in if !on { isHovering = false } }
         }
+    }
+
+    private func ringAnimation(_ index: Int) -> Animation {
+        if reduceMotion { return Hover.reduced }
+        return lit ? Hover.enter.delay(Double(index) * 0.025) : Hover.exit
     }
 }
 
@@ -291,13 +322,22 @@ private struct TabPill: View {
     let action: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.hoverGlowEnabled) private var glowEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    private var lit: Bool { isHovering && glowEnabled }
+
+    /// Кнопка, подпись и фон не масштабируются: в фоне летит matched-капсула,
+    /// любой масштаб сдвинул бы её старт при переключении. Приподнимается только иконка.
     var body: some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Image(systemName: tab.icon)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(isSelected ? tab.tint : (isHovering ? Theme.primaryText : Theme.secondaryText))
+                    .foregroundStyle(isSelected ? tab.tint : (lit ? tab.tint.opacity(0.9) : Theme.secondaryText))
+                    .animation(lit ? Hover.enter : Hover.exit) {
+                        $0.scaleEffect(lit && !reduceMotion ? 1.12 : 1)
+                    }
                 if isSelected {
                     Text(tab.title)
                         .font(.system(size: 12, weight: .semibold))
@@ -310,19 +350,37 @@ private struct TabPill: View {
             .frame(height: 26)
             .background {
                 if isSelected {
+                    // Кромка — внутри matched-капсулы, чтобы при переключении летела вместе с ней.
                     Capsule()
                         .fill(tab.tint.opacity(0.2))
+                        .overlay {
+                            if lit { rim(0.55) }
+                        }
                         .matchedGeometryEffect(id: "tabPill", in: namespace)
-                } else if isHovering {
-                    Capsule().fill(Color.white.opacity(0.07))
+                } else if lit {
+                    // Наведение заранее показывает цвет вкладки — по клику он перетекает в капсулу.
+                    Capsule()
+                        .fill(tab.tint.opacity(0.10))
+                        .overlay { rim(0.35) }
                 }
             }
+            .animation(reduceMotion ? Hover.reduced : Hover.fade, value: lit)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
         .onHover { isHovering = $0 }
+        .onChange(of: glowEnabled) { _, on in if !on { isHovering = false } }
         .help(tab.title)
+    }
+
+    private func rim(_ top: Double) -> some View {
+        Capsule()
+            .strokeBorder(
+                LinearGradient(colors: [tab.tint.opacity(top), tab.tint.opacity(0.05)], startPoint: .top, endPoint: .bottom),
+                lineWidth: 0.75
+            )
+            .allowsHitTesting(false)
     }
 }
 

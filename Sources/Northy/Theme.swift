@@ -79,7 +79,8 @@ nonisolated struct IslandShape: Shape {
     }
 }
 
-/// Плоская кнопка-иконка в круге с подсветкой при наведении.
+/// Плоская кнопка-иконка в круге: при наведении приподнимается и светится
+/// своим цветом (нейтральные — белым, выход и корзина — красным).
 struct IconButton: View {
     let systemName: String
     var tint: Color = Theme.secondaryText
@@ -89,20 +90,24 @@ struct IconButton: View {
     let action: () -> Void
 
     @State private var isHovering = false
+    @Environment(\.hoverGlowEnabled) private var glowEnabled
 
     var body: some View {
+        let lit = isHovering && glowEnabled
         Button(action: action) {
             Image(systemName: systemName)
                 .font(.system(size: size * 0.46, weight: .semibold))
-                .foregroundStyle(isHovering ? hoverTint : tint)
+                .foregroundStyle(lit ? hoverTint : tint)
                 .frame(width: size, height: size)
-                .background(Circle().fill(Color.white.opacity(isHovering ? 0.12 : 0.0)))
+                .background(Circle().fill(Color.white.opacity(lit ? 0.12 : 0.0)))
                 .contentShape(Circle())
+                .hoverGlow(lit, in: Circle(), style: .icon(hoverTint, neutral: hoverTint == Theme.primaryText))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .pointerStyle(.link)
         .onHover { isHovering = $0 }
-        .animation(.easeOut(duration: 0.15), value: isHovering)
+        .onChange(of: glowEnabled) { _, on in if !on { isHovering = false } }
+        .animation(.easeOut(duration: 0.15), value: lit)
         .help(help)
     }
 }
@@ -130,8 +135,9 @@ struct ConfirmClearButton: View {
                         .frame(height: 24)
                         .background(Capsule().fill(Theme.danger.opacity(0.85)))
                         .contentShape(Capsule())
+                        .hoverGlow(in: Capsule(), style: .destructive)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
                 .pointerStyle(.link)
                 .transition(.scale(scale: 0.8).combined(with: .opacity))
             } else {

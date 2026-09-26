@@ -61,11 +61,17 @@ struct ClipboardView: View {
                     .onKeyPress(.upArrow) { moveSelection(-1); return .handled }
                     .onSubmit(copySelected)
                 if !uiState.clipboardQuery.isEmpty {
+                    // Как нативная кнопка отмены в поле поиска: только цвет и масштаб.
                     Button { uiState.clipboardQuery = "" } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(Theme.tertiaryText)
+                        HoverReader { hovering in
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(hovering ? Theme.secondaryText : Theme.tertiaryText)
+                                .contentShape(Circle())
+                                .hoverGlow(hovering, in: Circle(), style: .glyph)
+                                .animation(Hover.fade, value: hovering)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable(scale: 0.9))
                     .pointerStyle(.link)
                 }
             }
@@ -74,23 +80,7 @@ struct ClipboardView: View {
             .background(Capsule().fill(Theme.card))
             .overlay(Capsule().strokeBorder(searchFocused ? Theme.sky.opacity(0.5) : .clear, lineWidth: 1))
 
-            HStack(spacing: 2) {
-                ForEach(ClipboardStore.KindFilter.allCases) { option in
-                    Button { withAnimation(Theme.tabSpring) { kind = option } } label: {
-                        Text(option.rawValue)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(kind == option ? Theme.primaryText : Theme.secondaryText)
-                            .padding(.horizontal, 9)
-                            .frame(height: 24)
-                            .background(Capsule().fill(kind == option ? Theme.sky.opacity(0.22) : .clear))
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .pointerStyle(.link)
-                }
-            }
-            .padding(2)
-            .background(Capsule().fill(Theme.card))
+            ChipPicker(options: ClipboardStore.KindFilter.allCases, selection: $kind, tint: Theme.sky, title: \.rawValue)
         }
     }
 
@@ -243,6 +233,7 @@ private struct ClipboardRow: View {
                             .offset(x: -5, y: -5)
                     }
                 }
+                .hoverGlow(isHovering, in: RoundedRectangle(cornerRadius: 8, style: .continuous), style: .tile(tileTint))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 12.5))
@@ -263,6 +254,8 @@ private struct ClipboardRow: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(isCopied ? Theme.mint.opacity(0.12) : (isHovering || isSelected ? Theme.cardHover : Theme.card))
         )
+        // Строка в ScrollView только светится: подъём обрезал бы края, ореол лез бы на соседей.
+        .hoverGlow(isHovering && !isSelected && !isCopied, in: RoundedRectangle(cornerRadius: 12, style: .continuous), style: .surface)
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .strokeBorder(borderColor, lineWidth: isSelected ? 1.2 : 0.8)
@@ -279,7 +272,15 @@ private struct ClipboardRow: View {
     private var borderColor: Color {
         if isCopied { return Theme.mint.opacity(0.45) }
         if isSelected { return Theme.sky.opacity(0.6) }
-        return Color.white.opacity(isHovering ? 0.08 : 0)
+        return .clear
+    }
+
+    private var tileTint: Color {
+        switch entry.content {
+        case .text: Theme.sky
+        case .files: Theme.amber
+        case .image: Theme.secondaryText
+        }
     }
 
     @ViewBuilder

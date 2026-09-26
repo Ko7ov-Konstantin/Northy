@@ -115,8 +115,9 @@ struct TranslatorView: View {
                             .frame(height: 24)
                             .background(Capsule().fill(Color.white.opacity(0.1)))
                             .contentShape(Capsule())
+                            .hoverGlow(in: Capsule(), style: .capsule(pasteFeedback == nil ? Theme.violet : Theme.mint))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.pressable)
                     .pointerStyle(.link)
                     .help("Заменить текст содержимым буфера обмена")
                     .animation(Theme.tabSpring, value: pasteFeedback)
@@ -167,8 +168,9 @@ struct TranslatorView: View {
                         .frame(height: 24)
                         .background(Capsule().fill(Color.white.opacity(0.1)))
                         .contentShape(Capsule())
+                        .hoverGlow(in: Capsule(), style: .capsule(isResultCopied ? Theme.mint : Theme.violet))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.pressable)
                 .pointerStyle(.link)
                 .padding(6)
                 .animation(Theme.tabSpring, value: isResultCopied)
@@ -196,8 +198,9 @@ struct TranslatorView: View {
                     .frame(width: 26, height: 26)
                     .background(Circle().fill(Theme.violet.opacity(0.15)))
                     .contentShape(Circle())
+                    .hoverGlow(in: Circle(), style: .accentCircle(Theme.violet))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.pressable)
             .pointerStyle(.link)
             .help("Поменять языки местами")
 
@@ -228,9 +231,10 @@ struct TranslatorView: View {
             .frame(height: 26)
             .background(Capsule().fill(Color.white.opacity(0.08)))
             .contentShape(Capsule())
+            .hoverGlow(in: Capsule(), style: .capsule(Theme.violet))
             .animation(.easeOut(duration: 0.15), value: title)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.pressable)
         .pointerStyle(.link)
     }
 

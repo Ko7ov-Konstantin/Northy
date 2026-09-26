@@ -28,44 +28,48 @@ final class QuickLook: NSObject, @preconcurrency QLPreviewPanelDataSource {
     }
 }
 
-/// Кнопка «Поделиться» (AirDrop, Сообщения, Почта…): системному меню нужна
-/// AppKit-вью, от которой его показать, поэтому кнопка — обёртка над NSButton.
-struct ShareButton: NSViewRepresentable {
+/// Кнопка «Поделиться» (AirDrop, Сообщения, Почта…). Системному меню нужна
+/// AppKit-вью, от которой его показать, — это невидимый якорь позади обычной
+/// IconButton: у NSButton наведением и курсором владеет AppKit, подсветки не было бы.
+struct ShareButton: View {
     let url: URL
+    var size: CGFloat = 20
 
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSButton(
-            image: NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Поделиться") ?? NSImage(),
-            target: context.coordinator,
-            action: #selector(Coordinator.share(_:))
-        )
-        button.isBordered = false
-        button.imageScaling = .scaleProportionallyDown
-        button.symbolConfiguration = .init(pointSize: 9, weight: .semibold)
-        button.contentTintColor = NSColor.white.withAlphaComponent(0.75)
-        button.toolTip = "Поделиться — AirDrop и другие"
-        return button
-    }
+    @State private var anchor = SharingAnchor()
 
-    func updateNSView(_ button: NSButton, context: Context) {
-        context.coordinator.url = url
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(url: url)
-    }
-
-    @MainActor
-    final class Coordinator: NSObject {
-        var url: URL
-
-        init(url: URL) {
-            self.url = url
+    var body: some View {
+        IconButton(systemName: "square.and.arrow.up", size: size, help: "Поделиться — AirDrop и другие") {
+            anchor.share(url)
         }
+        .background(SharingAnchorView(anchor: anchor).allowsHitTesting(false))
+    }
+}
 
-        @objc func share(_ sender: NSButton) {
-            NSSharingServicePicker(items: [url]).show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
-        }
+@MainActor
+final class SharingAnchor {
+    weak var view: NSView?
+
+    func share(_ url: URL) {
+        guard let view else { return }
+        NSSharingServicePicker(items: [url]).show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+    }
+}
+
+private final class PassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+}
+
+private struct SharingAnchorView: NSViewRepresentable {
+    let anchor: SharingAnchor
+
+    func makeNSView(context: Context) -> NSView {
+        let view = PassthroughView()
+        anchor.view = view
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        anchor.view = nsView
     }
 }
 

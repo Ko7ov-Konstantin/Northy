@@ -47,7 +47,7 @@ struct SettingsView: View {
                     }
                     .disabled(tab == .clipboard)
                 }
-                Text("«Буфер» включён всегда. Без «Лимитов» кольца пропадают из шапки, в строке меню лимиты остаются.")
+                Text("«Буфер» включён всегда. Без «Лимитов» Northy не обращается к claude.ai, а в строке меню вместо цифр — знак Northy.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

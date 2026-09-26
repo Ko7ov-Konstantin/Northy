@@ -132,13 +132,8 @@ struct DailyUsageChart: View {
                 }
             }
 
-            Picker("", selection: $metric) {
-                ForEach(Metric.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 220)
-            .frame(maxWidth: .infinity)
+            ChipPicker(options: Metric.allCases, selection: $metric, tint: UsageChartStyle.bar, title: \.rawValue)
+                .frame(maxWidth: .infinity)
 
             // Высота разбивки постоянная (до 4 моделей): иначе при наведении на дни
             // с разным числом моделей подменю меняет размер и дёргается.
@@ -189,11 +184,7 @@ struct PlanHistoryChart: View {
         let chosen = peaks.first { $0.date == hovered } ?? peaks.last
 
         VStack(alignment: .leading, spacing: 8) {
-            Picker("", selection: $series) {
-                ForEach(UsageHistory.Series.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            ChipPicker(options: UsageHistory.Series.allCases, selection: $series, tint: UsageChartStyle.bar, title: \.rawValue)
 
             if peaks.isEmpty {
                 Text("История копится при каждом обновлении лимитов")
