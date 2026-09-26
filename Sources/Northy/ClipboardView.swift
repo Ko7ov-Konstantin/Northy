@@ -9,7 +9,7 @@ struct ClipboardView: View {
     @State private var selectedID: UUID?
     @State private var copiedEntryID: UUID?
     /// Короткий отклик на строке: «Текст скопирован», ошибка распознавания.
-    @State private var notice: (id: UUID, text: String)?
+    @State private var notice: (id: UUID, text: String, tint: Color)?
     @State private var recognizingID: UUID?
     @FocusState private var searchFocused: Bool
 
@@ -89,27 +89,36 @@ struct ClipboardView: View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             ScrollViewReader { proxy in
                 ScrollView {
+                    let entries = visible
+                    let pinned = entries.filter(\.isPinned)
+                    let others = entries.filter { !$0.isPinned }
                     LazyVStack(spacing: 4) {
-                        ForEach(visible) { entry in
-                            ClipboardRow(
-                                entry: entry,
-                                imageURL: imageURL(for: entry),
-                                now: context.date,
-                                isCopied: copiedEntryID == entry.id,
-                                isSelected: selectedID == entry.id,
-                                notice: notice?.id == entry.id ? notice?.text : nil,
-                                isRecognizing: recognizingID == entry.id,
-                                onTap: { copy(entry) },
-                                onTogglePin: { withAnimation(Theme.tabSpring) { store.togglePin(entry) } },
-                                onRecognize: { recognize(entry) },
-                                onRemove: { withAnimation(Theme.tabSpring) { store.remove(entry) } }
+                        if !pinned.isEmpty {
+                            SectionHeader(
+                                icon: "pin.fill",
+                                title: "Закреплённые",
+                                tint: Theme.amber,
+                                detail: "\(store.history.filter(\.isPinned).count) из \(store.pinLimit)"
                             )
-                            .id(entry.id)
-                            .transition(.asymmetric(
-                                insertion: .move(edge: .top).combined(with: .opacity),
-                                removal: .opacity.combined(with: .scale(scale: 0.95))
-                            ))
+                            // Закреплённые — в общей тёплой подложке, отдельно от потока истории.
+                            VStack(spacing: 4) {
+                                ForEach(pinned) { row($0, now: context.date) }
+                            }
+                            .padding(4)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .fill(LinearGradient(colors: [Theme.amber.opacity(0.10), Theme.amber.opacity(0.03)], startPoint: .top, endPoint: .bottom))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .strokeBorder(LinearGradient(colors: [Theme.amber.opacity(0.4), Theme.amber.opacity(0.08)], startPoint: .top, endPoint: .bottom), lineWidth: 0.8)
+                            )
+                            if !others.isEmpty {
+                                SectionHeader(icon: "clock", title: "История", tint: Theme.secondaryText, detail: "\(others.count)")
+                                    .padding(.top, 6)
+                            }
                         }
+                        ForEach(others) { row($0, now: context.date) }
                     }
                     .animation(Theme.tabSpring, value: visible.map(\.id))
                 }
@@ -117,6 +126,43 @@ struct ClipboardView: View {
                     guard let id else { return }
                     withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .center) }
                 }
+            }
+        }
+    }
+
+    private func row(_ entry: ClipboardStore.Entry, now: Date) -> some View {
+        ClipboardRow(
+            entry: entry,
+            imageURL: imageURL(for: entry),
+            now: now,
+            isCopied: copiedEntryID == entry.id,
+            isSelected: selectedID == entry.id,
+            notice: notice?.id == entry.id ? notice.map { ($0.text, $0.tint) } : nil,
+            isRecognizing: recognizingID == entry.id,
+            onTap: { copy(entry) },
+            onTogglePin: { togglePin(entry) },
+            onRecognize: { recognize(entry) },
+            onRemove: { withAnimation(Theme.tabSpring) { store.remove(entry) } }
+        )
+        .id(entry.id)
+        .transition(.asymmetric(
+            insertion: .move(edge: .top).combined(with: .opacity),
+            removal: .opacity.combined(with: .scale(scale: 0.95))
+        ))
+    }
+
+    private func togglePin(_ entry: ClipboardStore.Entry) {
+        let done = withAnimation(Theme.tabSpring) { store.togglePin(entry) }
+        guard !done else { return }
+        show("Закреплено максимум — \(store.pinLimit), меняется в настройках", tint: Theme.amber, on: entry)
+    }
+
+    private func show(_ text: String, tint: Color, on entry: ClipboardStore.Entry) {
+        withAnimation(Theme.tabSpring) { notice = (entry.id, text, tint) }
+        Task {
+            try? await Task.sleep(for: .seconds(2.5))
+            if notice?.id == entry.id, notice?.text == text {
+                withAnimation(Theme.tabSpring) { notice = nil }
             }
         }
     }
@@ -169,11 +215,7 @@ struct ClipboardView: View {
                 message = error.localizedDescription
             }
             recognizingID = nil
-            withAnimation(Theme.tabSpring) { notice = (entry.id, message) }
-            try? await Task.sleep(for: .seconds(2))
-            if notice?.id == entry.id {
-                withAnimation(Theme.tabSpring) { notice = nil }
-            }
+            show(message, tint: Theme.mint, on: entry)
         }
     }
 }
@@ -210,7 +252,7 @@ private struct ClipboardRow: View {
     let now: Date
     let isCopied: Bool
     let isSelected: Bool
-    let notice: String?
+    let notice: (text: String, tint: Color)?
     let isRecognizing: Bool
     let onTap: () -> Void
     let onTogglePin: () -> Void
@@ -246,9 +288,9 @@ private struct ClipboardRow: View {
                     .lineLimit(2)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Text(notice ?? meta)
+                Text(notice?.text ?? meta)
                     .font(.system(size: 10.5))
-                    .foregroundStyle(notice == nil ? Theme.tertiaryText : Theme.mint)
+                    .foregroundStyle(notice?.tint ?? Theme.tertiaryText)
                     .lineLimit(1)
             }
             trailing
@@ -435,4 +477,32 @@ enum ThumbnailCache {
         cache.countLimit = 150
         return cache
     }()
+}
+
+/// Шапка раздела списка: значок, название, тонкая светящаяся линия и счётчик.
+private struct SectionHeader: View {
+    let icon: String
+    let title: String
+    let tint: Color
+    let detail: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(tint)
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+            Capsule()
+                .fill(LinearGradient(colors: [tint.opacity(0.35), tint.opacity(0)], startPoint: .leading, endPoint: .trailing))
+                .frame(height: 1)
+            Text(detail)
+                .font(.system(size: 10.5, weight: .medium))
+                .monospacedDigit()
+                .foregroundStyle(Theme.tertiaryText)
+        }
+        .padding(.horizontal, 6)
+        .padding(.top, 2)
+    }
 }

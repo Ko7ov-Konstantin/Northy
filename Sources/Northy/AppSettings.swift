@@ -7,6 +7,7 @@ import Observation
 @Observable
 final class AppSettings {
     static let clipboardLimits = [50, 100, 300, 1000]
+    static let pinLimits = [3, 5, 10, 20]
 
     @ObservationIgnored private let defaults: UserDefaults
 
@@ -23,6 +24,11 @@ final class AppSettings {
     /// Сколько записей хранит история буфера (закреплённые — сверх лимита).
     var clipboardLimit: Int {
         didSet { defaults.set(clipboardLimit, forKey: Keys.clipboardLimit) }
+    }
+
+    /// Сколько записей буфера можно закрепить.
+    var pinLimit: Int {
+        didSet { defaults.set(pinLimit, forKey: Keys.pinLimit) }
     }
 
     /// Какие вкладки показывать; «Буфер» включён всегда.
@@ -42,6 +48,7 @@ final class AppSettings {
         static let openOnHover = "panel.openOnHover"
         static let clipboardLimit = "clipboard.limit"
         static let enabledTabs = "panel.enabledTabs"
+        static let pinLimit = "clipboard.pinLimit"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -50,6 +57,8 @@ final class AppSettings {
         openOnHover = defaults.object(forKey: Keys.openOnHover) as? Bool ?? true
         let limit = defaults.integer(forKey: Keys.clipboardLimit)
         clipboardLimit = Self.clipboardLimits.contains(limit) ? limit : 100
+        let pins = defaults.integer(forKey: Keys.pinLimit)
+        pinLimit = Self.pinLimits.contains(pins) ? pins : 5
         if let stored = defaults.stringArray(forKey: Keys.enabledTabs) {
             enabledTabs = Set(stored.compactMap(PanelTab.init(rawValue:))).union([.clipboard])
         } else {

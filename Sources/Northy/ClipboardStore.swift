@@ -65,6 +65,8 @@ final class ClipboardStore {
             commit(Self.trimmed(history.reversed(), limit: limit).reversed())
         }
     }
+    /// Сколько записей можно закрепить; уменьшение уже закреплённые не трогает.
+    var pinLimit = 5
     private let store: JSONStore
     private var lastChangeCount = 0
     private var timer: Timer?
@@ -270,13 +272,21 @@ final class ClipboardStore {
         commit(history.filter(\.isPinned))
     }
 
-    func togglePin(_ entry: Entry) {
+    /// Можно ли закрепить ещё одну запись.
+    var canPin: Bool { history.filter(\.isPinned).count < pinLimit }
+
+    /// false — закрепить нельзя: уже закреплено pinLimit записей. Открепить можно всегда.
+    @discardableResult
+    func togglePin(_ entry: Entry) -> Bool {
+        let pinning = history.first { $0.id == entry.id }.map { !$0.isPinned } ?? false
+        if pinning, !canPin { return false }
         commit(history.map { item in
             guard item.id == entry.id else { return item }
             var toggled = item
             toggled.isPinned.toggle()
             return toggled
         })
+        return true
     }
 
     /// Файлы картинок, выпавших из истории (удаление, лимит, очистка), — с диска.

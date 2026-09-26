@@ -97,6 +97,17 @@ struct SettingsTests {
         #expect(PanelTab.resolve(.files, enabled: enabled) == .clipboard, "выключенная вкладка — на «Буфер»")
     }
 
+    @Test func pinLimitDefaultsToFiveAndPersists() throws {
+        let (defaults, suite) = try isolatedDefaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(AppSettings(defaults: defaults).pinLimit == 5)
+        AppSettings(defaults: defaults).pinLimit = 10
+        #expect(AppSettings(defaults: defaults).pinLimit == 10)
+        defaults.set(7, forKey: "clipboard.pinLimit")
+        #expect(AppSettings(defaults: defaults).pinLimit == 5, "мусор — значение по умолчанию")
+        #expect(AppSettings.pinLimits == [3, 5, 10, 20])
+    }
+
     @Test func clipboardLimitIsOneOfTheOffered() throws {
         let (defaults, suite) = try isolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }

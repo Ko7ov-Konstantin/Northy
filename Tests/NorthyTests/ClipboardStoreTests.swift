@@ -233,6 +233,28 @@ struct ClipboardStoreTests {
         #expect(reloaded.history.first?.isPinned == true)
     }
 
+    /// Закрепить можно не больше pinLimit; открепить — всегда; уже закреплённые сверх
+    /// уменьшенного лимита не открепляются сами.
+    @Test func pinLimitBlocksExtraPins() {
+        let store = ClipboardStore(directory: tempDirectory())
+        store.load()
+        store.pinLimit = 2
+        for text in ["а", "б", "в"] { store.add(.text(text)) }
+        #expect(store.togglePin(store.history[0]))
+        #expect(store.togglePin(store.history[1]))
+        #expect(!store.togglePin(store.history[2]), "третья сверх лимита")
+        #expect(store.history.filter(\.isPinned).count == 2)
+        #expect(store.canPin == false)
+
+        #expect(store.togglePin(store.history[0]), "открепить можно всегда")
+        #expect(store.canPin)
+
+        #expect(store.togglePin(store.history[0]), "место освободилось — снова закрепляется")
+        store.pinLimit = 1
+        #expect(store.history.filter(\.isPinned).count == 2, "уменьшение лимита ничего не открепляет")
+        #expect(!store.canPin)
+    }
+
     @Test func limitChangeTrimsOnlyUnpinned() {
         let dir = tempDirectory()
         let store = ClipboardStore(directory: dir, limit: 10)

@@ -58,6 +58,11 @@ struct SettingsView: View {
                         Text(Formatting.plural(limit, ("запись", "записи", "записей"))).tag(limit)
                     }
                 }
+                Picker("Закреплённых не больше", selection: $settings.pinLimit) {
+                    ForEach(AppSettings.pinLimits, id: \.self) { limit in
+                        Text(Formatting.plural(limit, ("запись", "записи", "записей"))).tag(limit)
+                    }
+                }
                 Text("Закреплённые записи хранятся сверх лимита и не удаляются при очистке.")
                     .font(.callout)
                     .foregroundStyle(.secondary)

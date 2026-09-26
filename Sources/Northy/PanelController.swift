@@ -588,12 +588,13 @@ final class PanelController: NSObject {
     private func observeClipboardLimit() {
         // Под наблюдением — только настройка: сам стор при смене лимита читает
         // историю, и слежка срабатывала бы на каждое копирование.
-        let limit = withObservationTracking {
-            settings.clipboardLimit
+        let (limit, pinLimit) = withObservationTracking {
+            (settings.clipboardLimit, settings.pinLimit)
         } onChange: { [weak self] in
             DispatchQueue.main.async { self?.observeClipboardLimit() }
         }
         clipboardStore.limit = limit
+        clipboardStore.pinLimit = pinLimit
     }
 
     // MARK: - Мост с расширением Finder
