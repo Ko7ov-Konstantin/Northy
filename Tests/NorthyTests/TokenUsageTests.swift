@@ -86,15 +86,56 @@ struct TokenUsageTests {
         #expect(stats.today == 150)
         #expect(stats.currentSession == 100)
         #expect(stats.currentWeek == 1150)
-        #expect(stats.lastTenDays == 1157)
-        #expect(stats.daily.count == 10)
+        #expect(stats.daily.count == 26, "по дню на каждое число с 1 сентября")
         #expect(stats.daily.last?.tokens == 150)
-        #expect(stats.daily.first?.tokens == 7)
-        #expect(stats.topModel == "claude-fable-5-1")
+        #expect(stats.daily.first?.tokens == 0)
+        #expect(stats.daily.first { $0.tokens == 7 } != nil)
+        #expect(stats.topModel == "claude-opus-5-5")
         #expect(abs(stats.todayCost - 1.5) < 0.0001)
         #expect(abs((stats.currentWeekCost ?? 0) - 11.5) < 0.0001)
-        #expect(abs(stats.lastTenDaysCost - 11.57) < 0.0001)
         #expect(abs((stats.daily.last?.cost ?? 0) - 1.5) < 0.0001)
+        #expect(stats.hasUsage)
+    }
+
+    /// «С 1 числа»: весь текущий месяц по сегодня, прошлый месяц не считается.
+    @Test func statsCountMonthToDate() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let date = { (raw: String) in ISO8601DateFormatter().date(from: raw)! }
+        func row(_ time: String, _ tokens: Int) -> TokenUsageScanner.Row {
+            TokenUsageScanner.Row(key: UUID().uuidString, timestamp: date(time), model: "claude-opus-5-5", tokens: tokens, cost: Double(tokens) / 100)
+        }
+        let rows = [
+            row("2026-08-31T23:59:00Z", 5000),
+            row("2026-09-01T00:00:00Z", 1),
+            row("2026-09-10T10:00:00Z", 20),
+            row("2026-09-26T11:00:00Z", 300),
+        ]
+        let now = date("2026-09-26T12:00:00Z")
+        let stats = TokenStats.make(rows: rows, now: now, sessionStart: nil, weekStart: nil, calendar: calendar)
+        #expect(stats.monthStart == date("2026-09-01T00:00:00Z"))
+        #expect(stats.monthToDate == 321)
+        #expect(abs(stats.monthToDateCost - 3.21) < 0.0001)
+        #expect(stats.daily.first?.date == date("2026-09-01T00:00:00Z"))
+        #expect(stats.daily.first?.tokens == 1)
+        #expect(stats.daily.reduce(0) { $0 + $1.tokens } == 321, "график — те же дни, что итог")
+
+        #expect(TokenStats.scanStart(now: now, calendar: calendar) == date("2026-09-01T00:00:00Z"), "в конце месяца читаем с 1 числа")
+        #expect(TokenStats.scanStart(now: date("2026-09-03T12:00:00Z"), calendar: calendar) == date("2026-08-27T00:00:00Z"), "в начале месяца — неделя назад: окно лимита началось в прошлом месяце")
+    }
+
+    /// 1 число, ещё ничего не потрачено, но недельное окно с прошлого месяца идёт — блок стоимости показываем.
+    @Test func weeklyWindowAloneCountsAsUsage() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let date = { (raw: String) in ISO8601DateFormatter().date(from: raw)! }
+        let rows = [TokenUsageScanner.Row(key: "a", timestamp: date("2026-09-29T10:00:00Z"), model: "claude-opus-5-5", tokens: 40, cost: 0.4)]
+        let stats = TokenStats.make(rows: rows, now: date("2026-10-01T08:00:00Z"), sessionStart: nil, weekStart: date("2026-09-28T00:00:00Z"), calendar: calendar)
+        #expect(stats.monthToDate == 0)
+        #expect(stats.daily.count == 1)
+        #expect(stats.currentWeek == 40)
+        #expect(stats.hasUsage)
+        #expect(!TokenStats.make(rows: [], now: date("2026-10-01T08:00:00Z"), sessionStart: nil, weekStart: nil, calendar: calendar).hasUsage)
     }
 
     // MARK: цены API

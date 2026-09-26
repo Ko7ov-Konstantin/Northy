@@ -50,7 +50,7 @@ struct LimitsMenuCard: View {
     private func tokenSection(now: Date) -> some View {
         if tokens.hasScanned {
             let stats = tokens.stats(for: store.snapshot, now: now)
-            if stats.lastTenDays > 0 {
+            if stats.hasUsage {
                 Divider()
                 CostSummaryView(stats: stats)
                 costChart(stats.daily)
@@ -72,14 +72,14 @@ struct LimitsMenuCard: View {
         }
     }
 
-    /// Стоимость по дням за 10 дней; самый дорогой день — с подписью.
+    /// Стоимость по дням с 1 числа месяца; самый дорогой день — с подписью.
     private func costChart(_ days: [TokenStats.Day]) -> some View {
         let peak = max(days.map(\.cost).max() ?? 0, 0.0001)
         return VStack(alignment: .trailing, spacing: 3) {
             Text(Formatting.dollars(peak))
                 .font(.system(size: 9.5))
                 .foregroundStyle(.secondary)
-            HStack(alignment: .bottom, spacing: 4) {
+            HStack(alignment: .bottom, spacing: UsageChartStyle.barSpacing(days.count)) {
                 ForEach(days, id: \.date) { day in
                     RoundedRectangle(cornerRadius: 2)
                         .fill(UsageChartStyle.bar.opacity(day.cost == peak ? 1 : 0.6))

@@ -12,12 +12,17 @@ enum UsageChartStyle {
         date.formatted(.dateTime.day().month(.abbreviated).locale(ruRU))
     }
 
+    /// К концу месяца столбиков до 31 — зазор сужается, чтобы они не превращались в нитки.
+    static func barSpacing(_ count: Int) -> CGFloat {
+        count > 16 ? 2 : 4
+    }
+
     static func dateTimeLabel(_ date: Date) -> String {
         date.formatted(.dateTime.day().month(.abbreviated).hour().minute().locale(ruRU))
     }
 }
 
-/// Сводка как у CodexBar: сегодня и текущее недельное окно в $ и токенах, 10 дней.
+/// Сводка как у CodexBar: сегодня, текущее недельное окно и месяц с 1 числа — в $ и токенах.
 struct CostSummaryView: View {
     let stats: TokenStats
 
@@ -31,9 +36,11 @@ struct CostSummaryView: View {
                 stat("Токены сегодня", Formatting.tokens(stats.today))
                 stat("Токены окна", stats.currentWeek.map(Formatting.tokens))
             }
+            // С 1 числа текущего месяца по сегодня.
+            let since = "С \(UsageChartStyle.dayLabel(stats.monthStart))"
             GridRow {
-                stat("10 дней: стоимость", Formatting.dollars(stats.lastTenDaysCost))
-                stat("10 дней: токены", Formatting.tokens(stats.lastTenDays))
+                stat("\(since): стоимость", Formatting.dollars(stats.monthToDateCost))
+                stat("\(since): токены", Formatting.tokens(stats.monthToDate))
             }
         }
     }
@@ -79,7 +86,7 @@ struct RecentWindowView: View {
     }
 }
 
-/// Столбики по дням за 10 дней с переключателем «Токены / Стоимость»;
+/// Столбики по дням с 1 числа месяца с переключателем «Токены / Стоимость»;
 /// клик по дню — разбивка по моделям.
 struct DailyUsageChart: View {
     let stats: TokenStats
@@ -118,7 +125,7 @@ struct DailyUsageChart: View {
                 .foregroundStyle(.secondary)
                 .frame(height: height)
 
-                HStack(alignment: .bottom, spacing: 4) {
+                HStack(alignment: .bottom, spacing: UsageChartStyle.barSpacing(days.count)) {
                     ForEach(days, id: \.date) { day in
                         let isSelected = day.date == selectedDay?.date
                         RoundedRectangle(cornerRadius: 3)
@@ -162,7 +169,7 @@ struct DailyUsageChart: View {
             }
             .frame(height: Self.breakdownHeight, alignment: .top)
 
-            Text("Итого, оценка за 10 дней: \(Formatting.dollars(stats.lastTenDaysCost))")
+            Text("Итого с \(UsageChartStyle.dayLabel(stats.monthStart)): \(Formatting.dollars(stats.monthToDateCost))")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
         }

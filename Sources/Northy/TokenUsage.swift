@@ -152,8 +152,8 @@ nonisolated final class TokenUsageScanner: @unchecked Sendable {
     }
 }
 
-/// Сводка для меню: сегодня, текущее окно 5 ч, текущая неделя лимита, 10 дней
-/// по дням (с разбивкой по моделям), топ-модель. Стоимость — по ценам API.
+/// Сводка для меню: сегодня, текущее окно 5 ч, текущая неделя лимита, текущий месяц
+/// с 1 числа по дням (с разбивкой по моделям), топ-модель. Стоимость — по ценам API.
 nonisolated struct TokenStats: Equatable, Sendable {
     struct ModelTotal: Equatable, Sendable {
         let model: String
@@ -174,16 +174,32 @@ nonisolated struct TokenStats: Equatable, Sendable {
     let currentSession: Int?
     let currentWeek: Int?
     let currentWeekCost: Double?
-    let lastTenDays: Int
-    let lastTenDaysCost: Double
+    let monthStart: Date
+    let monthToDate: Int
+    let monthToDateCost: Double
+    /// С 1 числа по сегодня, по дню на число.
     let daily: [Day]
     let topModel: String?
 
-    static let dayCount = 10
+    /// Есть что показать: расход в этом месяце или в недельном окне, начатом в прошлом.
+    var hasUsage: Bool { monthToDate > 0 || (currentWeek ?? 0) > 0 }
+
+    static func monthStart(now: Date, calendar: Calendar = .current) -> Date {
+        calendar.dateInterval(of: .month, for: now)?.start ?? calendar.startOfDay(for: now)
+    }
+
+    /// С какого момента читать логи: с 1 числа, но не позже чем неделю назад —
+    /// в начале месяца недельное окно лимита началось ещё в прошлом.
+    static func scanStart(now: Date, calendar: Calendar = .current) -> Date {
+        let todayStart = calendar.startOfDay(for: now)
+        let weekAgo = calendar.date(byAdding: .day, value: -7, to: todayStart) ?? todayStart
+        return min(weekAgo, monthStart(now: now, calendar: calendar))
+    }
 
     static func make(rows: [TokenUsageScanner.Row], now: Date, sessionStart: Date?, weekStart: Date?, calendar: Calendar = .current) -> TokenStats {
         let todayStart = calendar.startOfDay(for: now)
-        let firstDay = calendar.date(byAdding: .day, value: -(dayCount - 1), to: todayStart) ?? todayStart
+        let firstDay = monthStart(now: now, calendar: calendar)
+        let dayCount = (calendar.dateComponents([.day], from: firstDay, to: todayStart).day ?? 0) + 1
         let recent = rows.filter { $0.timestamp >= firstDay && $0.timestamp <= now }
 
         var perDay: [Date: [String: (tokens: Int, cost: Double)]] = [:]
@@ -219,8 +235,9 @@ nonisolated struct TokenStats: Equatable, Sendable {
             currentSession: window(since: sessionStart)?.tokens,
             currentWeek: week?.tokens,
             currentWeekCost: week?.cost,
-            lastTenDays: daily.reduce(0) { $0 + $1.tokens },
-            lastTenDaysCost: daily.reduce(0) { $0 + $1.cost },
+            monthStart: firstDay,
+            monthToDate: daily.reduce(0) { $0 + $1.tokens },
+            monthToDateCost: daily.reduce(0) { $0 + $1.cost },
             daily: daily,
             topModel: perModel.max { $0.value < $1.value }?.key
         )
@@ -250,8 +267,7 @@ final class TokenStatsStore {
         lastScan = now
         isScanning = true
         defer { isScanning = false }
-        // 10 дней сканирования целиком покрывают недельное окно лимита (7 дней).
-        let since = Calendar.current.date(byAdding: .day, value: -(TokenStats.dayCount - 1), to: Calendar.current.startOfDay(for: now)) ?? now
+        let since = TokenStats.scanStart(now: now)
         let scanner = scanner
         rows = await Task.detached(priority: .utility) { scanner.scan(since: since) }.value
         sessions = ClaudeSessions.make(rows: rows, now: now)

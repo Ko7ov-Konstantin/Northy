@@ -72,7 +72,7 @@ struct LimitsView: View {
     private func costSection(_ snapshot: UsageSnapshot, now: Date) -> some View {
         if tokens.hasScanned {
             let stats = tokens.stats(for: snapshot, now: now)
-            if stats.lastTenDays > 0 {
+            if stats.hasUsage {
                 SectionCard {
                     CostSummaryView(stats: stats)
                     RecentWindowView(stats: stats, weekly: snapshot.windows.first { $0.kind == .weekly })
