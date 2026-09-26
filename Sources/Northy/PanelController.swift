@@ -346,7 +346,7 @@ final class PanelController: NSObject {
     private func observeLimits() {
         withObservationTracking {
             let enabled = limitsEnabled
-            updateStatusButton(lines: enabled ? (limitsStore.snapshot?.statusBarLines ?? []) : [])
+            updateStatusButton(lines: enabled ? statusBarLines() : [])
             limitsMenuItems.forEach { $0.isHidden = !enabled }
             // Высота карточки меняется вместе с данными (строки лимитов, ошибка, загрузка).
             _ = limitsStore.errorMessage
@@ -371,6 +371,17 @@ final class PanelController: NSObject {
         }
     }
 
+    /// Строки остатка для строки меню. До первого обновления после запуска —
+    /// последние известные: при включённых лимитах в строке меню только цифры.
+    private func statusBarLines() -> [String] {
+        let key = "statusBar.lastLines"
+        if let lines = limitsStore.snapshot?.statusBarLines, !lines.isEmpty {
+            UserDefaults.standard.set(lines, forKey: key)
+            return lines
+        }
+        return UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+
     private func updateStatusButton(lines: [String]) {
         guard let button = statusItem?.button else { return }
         button.title = ""
@@ -381,9 +392,10 @@ final class PanelController: NSObject {
     /// Иконка и строки остатка друг под другом (как у CodexBar). Шаблонная
     /// картинка — цвет подстраивается под светлую и тёмную строку меню.
     private static func statusImage(lines: [String]) -> NSImage? {
+        // Либо знак Northy (лимиты выключены или ещё не загружены), либо только цифры лимитов.
         guard !lines.isEmpty else { return NorthyIcon.menuBarImage() }
 
-        let symbol: NSImage? = NorthyIcon.menuBarImage(size: 14)
+        let symbol: NSImage? = nil
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 9.5, weight: .semibold),
             .foregroundColor: NSColor.black,
