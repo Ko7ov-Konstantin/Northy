@@ -292,7 +292,7 @@ private struct LimitsBadge: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.pressable)
-            .pointerStyle(.link)
+            .handCursor()
             .onHover { isHovering = $0 }
             .onChange(of: glowEnabled) { _, on in if !on { isHovering = false } }
         }
@@ -383,7 +383,7 @@ private struct TabPill: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .pointerStyle(.link)
+        .handCursor()
         .onHover { isHovering = $0 }
         .onChange(of: glowEnabled) { _, on in if !on { isHovering = false } }
         .help(tab.title)
@@ -449,6 +449,14 @@ private struct ResizeHandle: View {
             .contentShape(Rectangle())
             .onHover { isHovering = $0 }
             .pointerStyle(.frameResize(position: .bottomTrailing))
+            .onContinuousHover { phase in
+                if case .active = phase {
+                    PanelCursor.overResize = true
+                    NSCursor.frameResize(position: .bottomRight, directions: .all).set()
+                } else {
+                    PanelCursor.overResize = false
+                }
+            }
             .help("Потяните, чтобы изменить размер панели")
             .gesture(
                 DragGesture(minimumDistance: 1)

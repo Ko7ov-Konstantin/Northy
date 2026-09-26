@@ -135,7 +135,7 @@ struct DailyUsageChart: View {
                             .contentShape(Rectangle())
                             .onTapGesture { selected = day.date }
                             .onHover { if $0 { selected = day.date } }
-                            .pointerStyle(.link)
+                            .handCursor()
                     }
                 }
             }

@@ -105,7 +105,7 @@ struct IconButton: View {
                 .hoverGlow(lit, in: Circle(), style: .icon(hoverTint))
         }
         .buttonStyle(.pressable)
-        .pointerStyle(.link)
+        .handCursor()
         .onHover { isHovering = $0 }
         .onChange(of: glowEnabled) { _, on in if !on { isHovering = false } }
         .animation(.easeOut(duration: 0.15), value: lit)
@@ -139,7 +139,7 @@ struct ConfirmClearButton: View {
                         .hoverGlow(in: Capsule(), style: .destructive)
                 }
                 .buttonStyle(.pressable)
-                .pointerStyle(.link)
+                .handCursor()
                 .transition(.scale(scale: 0.8).combined(with: .opacity))
             } else {
                 IconButton(systemName: "trash", hoverTint: Theme.danger, help: "Очистить") {

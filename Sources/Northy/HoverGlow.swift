@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 extension EnvironmentValues {
@@ -138,7 +139,28 @@ struct HoverGlowTracking<S: InsettableShape>: ViewModifier {
     }
 }
 
+/// Над кликабельным ли сейчас мышь: SwiftUI сообщает о наведении то до, то после
+/// mouseMoved панели, поэтому курсор решается по флагу, а не по порядку событий.
+enum PanelCursor {
+    static var overClickable = false
+    static var overResize = false
+}
+
 extension View {
+    /// Рука над кликабельным: системный pointerStyle плюс явная установка на каждое
+    /// движение (см. TrackingHostingView.mouseMoved) — иначе рука только после клика.
+    func handCursor() -> some View {
+        pointerStyle(.link)
+            .onContinuousHover { phase in
+                if case .active = phase {
+                    PanelCursor.overClickable = true
+                    NSCursor.pointingHand.set()
+                } else {
+                    PanelCursor.overClickable = false
+                }
+            }
+    }
+
     func hoverGlow<S: InsettableShape>(_ isHovering: Bool, in shape: S, style: HoverGlowStyle) -> some View {
         modifier(HoverGlow(isHovering: isHovering, shape: shape, style: style))
     }
@@ -252,7 +274,7 @@ private struct Chip: View {
                 .animation(Hover.fade, value: hovering)
         }
         .onTapGesture(perform: action)
-        .pointerStyle(.link)
+        .handCursor()
         .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
     }
 }

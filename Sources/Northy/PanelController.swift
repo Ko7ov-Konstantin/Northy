@@ -54,6 +54,7 @@ private extension NSView {
 final class TrackingHostingView<Content: View>: NSHostingView<Content> {
     var onMouseEntered: (() -> Void)?
     var onMouseExited: (() -> Void)?
+    var onMouseMoved: (() -> Void)?
 
     private var trackingArea: NSTrackingArea?
 
@@ -64,7 +65,7 @@ final class TrackingHostingView<Content: View>: NSHostingView<Content> {
         }
         let area = NSTrackingArea(
             rect: bounds,
-            options: [.mouseEnteredAndExited, .activeAlways],
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways],
             owner: self,
             userInfo: nil
         )
@@ -82,6 +83,22 @@ final class TrackingHostingView<Content: View>: NSHostingView<Content> {
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         if event.trackingArea === trackingArea { onMouseExited?() }
+    }
+
+    /// Курсор ставим сами на каждое движение: встроенный pointerStyle SwiftUI в этой
+    /// панели срабатывал только после клика. Рука — по флагу PanelCursor, иначе
+    /// текстовый над полем ввода или стрелка.
+    override func mouseMoved(with event: NSEvent) {
+        onMouseMoved?()
+        super.mouseMoved(with: event)
+        let hit = hitTest(convert(event.locationInWindow, from: nil))
+        if PanelCursor.overClickable {
+            NSCursor.pointingHand.set()
+        } else if PanelCursor.overResize {
+            NSCursor.frameResize(position: .bottomRight, directions: .all).set()
+        } else {
+            (hit is NSText || hit is NSTextField ? NSCursor.iBeam : NSCursor.arrow).set()
+        }
     }
 }
 
@@ -108,6 +125,8 @@ final class PanelController: NSObject {
     private var collapseWorkItem: DispatchWorkItem?
     /// Отложенный старт анимации раскрытия отменяется свёртыванием, случившимся раньше.
     private var expandGeneration = 0
+    /// Кто был активен до того, как панель под мышью активировала Northy.
+    private var appBeforeHover: NSRunningApplication?
     private var expandWorkItem: DispatchWorkItem?
     private var dragMonitor: Any?
     private var statusItem: NSStatusItem?
@@ -161,6 +180,11 @@ final class PanelController: NSObject {
         )
         let hostingView = TrackingHostingView(rootView: rootView)
         hostingView.onMouseEntered = { [weak self] in self?.handleMouseEntered() }
+        // Активироваться macOS даёт только в ответ на событие — поэтому из движения мыши.
+        hostingView.onMouseMoved = { [weak self] in
+            guard let self, self.uiState.isExpanded else { return }
+            self.takeKeyForPointer()
+        }
         hostingView.onMouseExited = { [weak self] in self?.handleMouseExited() }
         self.hostingView = hostingView
 
@@ -765,11 +789,20 @@ final class PanelController: NSObject {
         NotchGeometry.storeContentSize(NotchGeometry.contentSize, in: .standard)
     }
 
-    /// Курсоры (рука над кнопками) macOS меняет только у ключевого окна — иначе над
-    /// панелью остаётся курсор окна под ней. Поэтому открытая панель под мышью
-    /// берёт клавиатуру, а свернувшись, отдаёт её обратно (returnKeyFocus).
+    /// Курсор (рука над кнопками) фоновому приложению macOS менять не даёт — над
+    /// панелью оставался курсор окна под ней. Поэтому открытая панель под мышью
+    /// активирует Northy, а свернувшись, возвращает активным прежнее приложение.
     private func takeKeyForPointer() {
-        guard !panel.isKeyWindow, panel.frame.contains(NSEvent.mouseLocation) else { return }
+        guard panel.frame.contains(NSEvent.mouseLocation) else { return }
+        // NSApp.isActive бывает устаревшим (true, хотя впереди другое приложение) —
+        // сверяемся с тем, кто на самом деле активен в системе.
+        let front = NSWorkspace.shared.frontmostApplication
+        let isFront = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier
+        guard !isFront || !panel.isKeyWindow else { return }
+        if !isFront {
+            appBeforeHover = front
+            NSApp.activate()
+        }
         let responder = panel.firstResponder
         panel.makeKey()
         // Стать ключевой — не значит начать печатать: поле ввода само фокус не получает.
@@ -783,7 +816,16 @@ final class PanelController: NSObject {
     /// Мышь над вырезом — ждём её ухода: переупорядочивание под ней снова раскрыло бы
     /// панель, а на выходе мыши сворачивание (и этот возврат) вызывается повторно.
     private func returnKeyFocus() {
-        guard panel.isKeyWindow, !panel.frame.contains(NSEvent.mouseLocation) else { return }
+        guard !panel.frame.contains(NSEvent.mouseLocation) else { return }
+        if let app = appBeforeHover {
+            appBeforeHover = nil
+            // Открыто окно настроек или Quick Look — активность у Northy не отбираем.
+            if NSApp.isActive, !NSApp.windows.contains(where: { $0 !== panel && $0.isVisible && $0.isKeyWindow }) {
+                app.activate()
+                return
+            }
+        }
+        guard panel.isKeyWindow else { return }
         panel.orderOut(nil)
         panel.orderFrontRegardless()
     }
@@ -869,3 +911,4 @@ extension PanelController: NSMenuDelegate {
         refreshEverything(force: false)
     }
 }
+

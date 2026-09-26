@@ -72,7 +72,7 @@ struct ClipboardView: View {
                         }
                     }
                     .buttonStyle(.pressable(scale: 0.9))
-                    .pointerStyle(.link)
+                    .handCursor()
                 }
             }
             .padding(.horizontal, 10)
@@ -289,7 +289,7 @@ private struct ClipboardRow: View {
             }
         }
         .onTapGesture(perform: onTap)
-        .pointerStyle(.link)
+        .handCursor()
         .animation(isHovering ? Hover.enter : Hover.exit, value: isHovering)
         .help("Нажмите, чтобы скопировать")
     }

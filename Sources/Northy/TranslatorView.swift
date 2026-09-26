@@ -119,7 +119,7 @@ struct TranslatorView: View {
                             .hoverGlow(in: Capsule(), style: .capsule(pasteFeedback == nil ? Theme.violet : Theme.mint))
                     }
                     .buttonStyle(.pressable)
-                    .pointerStyle(.link)
+                    .handCursor()
                     .help("Заменить текст содержимым буфера обмена")
                     .animation(Theme.tabSpring, value: pasteFeedback)
                 }
@@ -172,7 +172,7 @@ struct TranslatorView: View {
                         .hoverGlow(in: Capsule(), style: .capsule(isResultCopied ? Theme.mint : Theme.violet))
                 }
                 .buttonStyle(.pressable)
-                .pointerStyle(.link)
+                .handCursor()
                 .padding(6)
                 .animation(Theme.tabSpring, value: isResultCopied)
             }
@@ -208,7 +208,7 @@ struct TranslatorView: View {
                 }
             }
             .buttonStyle(.pressable)
-            .pointerStyle(.link)
+            .handCursor()
             .help("Поменять языки местами")
 
             languagePill(targetLanguage.rawValue) { cycleTarget() }
@@ -246,7 +246,7 @@ struct TranslatorView: View {
             }
         }
         .buttonStyle(.pressable)
-        .pointerStyle(.link)
+        .handCursor()
     }
 
     private func cycleSource() {
