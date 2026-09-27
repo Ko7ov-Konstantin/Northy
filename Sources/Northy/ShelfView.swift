@@ -13,7 +13,7 @@ struct ShelfView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(store.files, id: \.path) { url in
-                        ShelfTile(url: url) {
+                        ShelfTile(url: url, siblings: store.files) {
                             withAnimation(Theme.tabSpring) { store.remove(url) }
                         }
                         .transition(.scale(scale: 0.8).combined(with: .opacity))
@@ -45,6 +45,8 @@ private struct ShelfDropZone: View {
 /// панель действий: просмотр, «Поделиться», путь в буфер, Finder, убрать.
 private struct ShelfTile: View {
     let url: URL
+    /// Все файлы полки — быстрый просмотр листает их стрелками.
+    let siblings: [URL]
     let onRemove: () -> Void
 
     @State private var isHovering = false
@@ -113,7 +115,7 @@ private struct ShelfTile: View {
             HStack(spacing: 0) {
                 if fileExists {
                     IconButton(systemName: "eye", size: 20, help: "Быстрый просмотр") {
-                        QuickLook.shared.show(url)
+                        QuickLook.shared.show(url, among: siblings)
                     }
                     ShareButton(url: url)
                     IconButton(systemName: "doc.on.doc", size: 20, help: "Скопировать путь") {

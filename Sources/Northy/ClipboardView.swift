@@ -142,6 +142,7 @@ struct ClipboardView: View {
             onTap: { copy(entry) },
             onTogglePin: { togglePin(entry) },
             onRecognize: { recognize(entry) },
+            onPreview: { preview(entry) },
             onRemove: { withAnimation(Theme.tabSpring) { store.remove(entry) } }
         )
         .id(entry.id)
@@ -149,6 +150,12 @@ struct ClipboardView: View {
             insertion: .move(edge: .top).combined(with: .opacity),
             removal: .opacity.combined(with: .scale(scale: 0.95))
         ))
+    }
+
+    /// Быстрый просмотр по всем картинкам видимого списка, начиная с этой.
+    private func preview(_ entry: ClipboardStore.Entry) {
+        guard let url = imageURL(for: entry) else { return }
+        QuickLook.shared.show(url, among: visible.compactMap(imageURL(for:)))
     }
 
     private func togglePin(_ entry: ClipboardStore.Entry) {
@@ -267,6 +274,7 @@ private struct ClipboardRow: View {
     let onTap: () -> Void
     let onTogglePin: () -> Void
     let onRecognize: () -> Void
+    let onPreview: () -> Void
     let onRemove: () -> Void
 
     @State private var isHovering = false
@@ -376,6 +384,7 @@ private struct ClipboardRow: View {
             // onTapGesture строки, пока клик приходится на их собственную область.
             HStack(spacing: 2) {
                 if case .image = entry.content {
+                    IconButton(systemName: "eye", size: 22, help: "Быстрый просмотр — стрелками по всем картинкам", action: onPreview)
                     if isRecognizing {
                         ProgressView().controlSize(.mini).frame(width: 22, height: 22)
                     } else {

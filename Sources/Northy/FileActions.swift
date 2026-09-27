@@ -2,29 +2,43 @@ import AppKit
 import Quartz
 import SwiftUI
 
-/// Быстрый просмотр файла с полки — системная панель Quick Look.
+/// Быстрый просмотр — системная панель Quick Look. Получает весь набор (картинки
+/// буфера, файлы полки) и открывается на выбранном: дальше листается стрелками.
 @MainActor
 final class QuickLook: NSObject, @preconcurrency QLPreviewPanelDataSource {
     static let shared = QuickLook()
 
-    private var url: URL?
+    private var urls: [URL] = []
+    private(set) var startIndex = 0
 
-    func show(_ url: URL) {
-        self.url = url
+    func prepare(_ urls: [URL], startingAt url: URL) {
+        self.urls = urls
+        startIndex = urls.firstIndex(of: url) ?? 0
+    }
+
+    func show(_ url: URL, among urls: [URL]? = nil) {
+        prepare(urls ?? [url], startingAt: url)
         guard let panel = QLPreviewPanel.shared() else { return }
         panel.dataSource = self
         panel.reloadData()
+        panel.currentPreviewItemIndex = startIndex
         // Accessory-приложение без активации не получит в панель фокус (стрелки, пробел).
         NSApp.activate()
         panel.makeKeyAndOrderFront(nil)
+        // Панель у выреза висит на уровне .popUpMenu — просмотр поверх неё. Quick Look
+        // выставляет свой уровень при показе, поэтому поднимаем после.
+        DispatchQueue.main.async {
+            panel.level = NSWindow.Level(NSWindow.Level.popUpMenu.rawValue + 1)
+            panel.orderFrontRegardless()
+        }
     }
 
     func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int {
-        url == nil ? 0 : 1
+        urls.count
     }
 
     func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
-        url as NSURL?
+        urls.indices.contains(index) ? urls[index] as NSURL : nil
     }
 }
 
