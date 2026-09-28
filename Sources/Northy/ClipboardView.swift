@@ -84,6 +84,8 @@ struct ClipboardView: View {
         }
     }
 
+    private static let listTopID = "clipboard.listTop"
+
     private var list: some View {
         // Раз в полминуты обновляет «5 мин назад» во всех строках разом.
         TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -121,6 +123,11 @@ struct ClipboardView: View {
                         ForEach(others) { row($0, now: context.date) }
                     }
                     .animation(Theme.tabSpring, value: visible.map(\.id))
+                    .id(Self.listTopID)
+                }
+                // Новое в буфере появляется сверху — при возврате на вкладку список открывается с начала.
+                .onChange(of: uiState.selectedTab) { _, tab in
+                    if tab == .clipboard { proxy.scrollTo(Self.listTopID, anchor: .top) }
                 }
                 .onChange(of: selectedID) { _, id in
                     guard let id else { return }
