@@ -30,7 +30,7 @@ struct SettingsView: View {
                         .font(.callout)
                 }
                 Toggle("Открывать при наведении на вырез", isOn: $settings.openOnHover)
-                Text("Панель можно растянуть за уголок справа снизу. ⌘1–⌘4 — вкладки по порядку, ⌘F — поиск в буфере, Esc — свернуть.")
+                Text("Панель можно растянуть за уголок справа снизу. ⌘1–⌘5 — вкладки по порядку, ⌘F — поиск в буфере, Esc — свернуть.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -47,7 +47,7 @@ struct SettingsView: View {
                     }
                     .disabled(tab == .clipboard)
                 }
-                Text("«Буфер» включён всегда. Без «Лимитов» Northy не обращается к claude.ai, а в строке меню вместо цифр — знак Northy.")
+                Text("«Буфер» включён всегда. Без «Лимитов» Northy не обращается к claude.ai, а в строке меню вместо цифр — знак Northy. «Музыка» — сайт music.youtube.com внутри панели: вход в Google выполняется на его странице, Northy пароль не видит; при выключенной вкладке плеер закрывается.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }

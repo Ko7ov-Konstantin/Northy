@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum PanelTab: String, CaseIterable, Identifiable, Hashable {
-    case clipboard, files, translator, limits
+    case clipboard, files, translator, limits, music
 
     var id: Self { self }
 
@@ -23,6 +23,7 @@ enum PanelTab: String, CaseIterable, Identifiable, Hashable {
         case .files: "Файлы"
         case .translator: "Переводчик"
         case .limits: "Лимиты"
+        case .music: "Музыка"
         }
     }
 
@@ -32,6 +33,7 @@ enum PanelTab: String, CaseIterable, Identifiable, Hashable {
         case .files: "tray.full"
         case .translator: "character.bubble"
         case .limits: "gauge.with.dots.needle.50percent"
+        case .music: "music.note"
         }
     }
 
@@ -148,6 +150,9 @@ struct PanelRootView: View {
                 if uiState.enabledTabs.contains(.limits) {
                     tabLayer(.limits) { LimitsView(store: limitsStore, tokens: tokenStore) }
                 }
+                if uiState.enabledTabs.contains(.music) {
+                    tabLayer(.music) { MusicView() }
+                }
             }
             .padding(.horizontal, Self.earRadius + 12)
             .padding(.top, 8)
@@ -233,7 +238,7 @@ private struct HeaderBar: View {
                 CountBadge(text: "\(shelfStore.files.count)", tint: Theme.amber)
                 ConfirmClearButton { withAnimation(Theme.tabSpring) { shelfStore.clear() } }
             }
-        case .translator, .limits:
+        case .translator, .limits, .music:
             EmptyView()
         }
     }

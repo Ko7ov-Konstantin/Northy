@@ -32,6 +32,7 @@ extension PanelTab {
         case .files: Theme.amber
         case .translator: Theme.violet
         case .limits: Theme.rose
+        case .music: Theme.mint
         }
     }
 }
