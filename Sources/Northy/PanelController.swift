@@ -157,8 +157,6 @@ final class PanelController: NSObject {
     private var expandWorkItem: DispatchWorkItem?
     private var dragMonitor: Any?
     private var statusItem: NSStatusItem?
-    /// Отдельный значок «стоп» в строке меню — только пока идёт запись экрана.
-    private var recordingStopItem: NSStatusItem?
     private static let collapseDelay: TimeInterval = 0.35
     /// Пауза перед разворотом по наведению: курсор, идущий к пунктам меню-бара
     /// мимо выреза, не должен раскрывать панель на пол-экрана.
@@ -407,7 +405,6 @@ final class PanelController: NSObject {
     private func observeLimits() {
         withObservationTracking {
             updateStatusButton(lines: StatusBarButton.lines(activity: toolsStore.activity, limits: limitsEnabled ? statusBarLines() : []))
-            updateRecordingStopItem(StatusBarButton.stopItem(activity: toolsStore.activity))
             // Вкладка меню, как у CodexBar: пункты и подменю — только выбранного источника.
             let provider = limitsEnabled ? LimitsProvider.resolve(settings.menuProvider, available: limitsProviders) : nil
             limitsMenuItems.forEach { $0.isHidden = provider == nil }
@@ -459,27 +456,6 @@ final class PanelController: NSObject {
         button.title = ""
         button.image = Self.statusImage(lines: lines)
         statusItem?.length = lines.isEmpty ? NSStatusItem.squareLength : NSStatusItem.variableLength
-    }
-
-    private func updateRecordingStopItem(_ isEnabled: Bool?) {
-        guard let isEnabled else {
-            if let item = recordingStopItem { NSStatusBar.system.removeStatusItem(item) }
-            recordingStopItem = nil
-            return
-        }
-        if recordingStopItem == nil {
-            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-            item.button?.image = NSImage(systemSymbolName: "stop.circle.fill", accessibilityDescription: "Остановить запись")
-            item.button?.toolTip = "Остановить запись"
-            item.button?.target = self
-            item.button?.action = #selector(stopRecordingFromStatusBar)
-            recordingStopItem = item
-        }
-        recordingStopItem?.button?.isEnabled = isEnabled
-    }
-
-    @objc private func stopRecordingFromStatusBar() {
-        toolsStore.stopRecording()
     }
 
     /// Иконка и строки остатка друг под другом (как у CodexBar). Шаблонная

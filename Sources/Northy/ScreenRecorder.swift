@@ -87,7 +87,10 @@ enum ScreenRecorder {
         let file = SCRecordingOutputConfiguration()
         file.outputURL = output
         file.outputFileType = .mov
-        try stream.addRecordingOutput(SCRecordingOutput(configuration: file, delegate: end))
+        // Свою ссылку держим до конца: иначе по системной кнопке «стоп» SCK уничтожает объект
+        // записи раньше, чем делегат узнаёт, что файл дописан, и Northy считает, что запись идёт.
+        let recordingOutput = SCRecordingOutput(configuration: file, delegate: end)
+        try stream.addRecordingOutput(recordingOutput)
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
             // @Sendable: SCK зовёт обработчики со своей очереди, главный актор им не нужен.
             stream.startCapture { @Sendable error in
@@ -96,7 +99,12 @@ enum ScreenRecorder {
         }
         return CaptureProcess(
             interrupt: { stream.stopCapture { @Sendable _ in end.finishSoon() } },
-            finished: { for await _ in end.finished {} },
+            finished: {
+                for await _ in end.finished {}
+                // Системная кнопка «стоп» закрывает только файл — поток останавливаем сами.
+                withExtendedLifetime(recordingOutput) {}
+                stream.stopCapture { @Sendable _ in }
+            },
             // Не дольше 5 с: зависшая запись не должна держать выход из приложения.
             waitUntilExit: { end.wait(seconds: 5) }
         )

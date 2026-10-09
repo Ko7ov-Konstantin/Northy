@@ -90,9 +90,13 @@ xcrun swiftc -O -swift-version 5 -module-name NorthyFinder -parse-as-library -ap
 	"$EXT_SRC/FinderSync.swift" -o "$EXT/Contents/MacOS/NorthyFinder"
 cp "$EXT_SRC/Info.plist" "$EXT/Contents/Info.plist"
 plutil -lint "$EXT/Contents/Info.plist"
-codesign --force --sign - --entitlements "$EXT_SRC/NorthyFinder.entitlements" "$EXT"
+# Постоянный сертификат «Northy Dev» из Связки ключей сохраняет разрешения macOS между
+# сборками; без него подпись безымянная, и разрешения приходится выдавать заново.
+IDENTITY="Northy Dev"
+security find-identity -p codesigning | grep -q "\"$IDENTITY\"" || IDENTITY="-"
+codesign --force --sign "$IDENTITY" --entitlements "$EXT_SRC/NorthyFinder.entitlements" "$EXT"
 
-codesign --force --sign - "$APP"
+codesign --force --sign "$IDENTITY" "$APP"
 
 echo "Собрано: $APP"
 echo "Расширение Finder включается один раз: Системные настройки → Основные → Объекты входа и расширения → Finder"

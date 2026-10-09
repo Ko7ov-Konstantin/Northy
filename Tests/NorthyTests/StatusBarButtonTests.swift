@@ -31,19 +31,4 @@ struct StatusBarButtonTests {
         #expect(StatusBarButton.lines(activity: .capturing(.area), limits: limits) == limits)
         #expect(StatusBarButton.lines(activity: .pickingColor, limits: limits) == limits)
     }
-
-    @Test func stopItemIsActiveWhileRecording() {
-        #expect(StatusBarButton.stopItem(activity: .recording(since: .now)) == true)
-    }
-
-    @Test func stopItemIsDisabledWhileSaving() {
-        #expect(StatusBarButton.stopItem(activity: .finishing) == false)
-    }
-
-    @Test func stopItemIsHiddenOutsideRecording() {
-        #expect(StatusBarButton.stopItem(activity: .idle) == nil)
-        #expect(StatusBarButton.stopItem(activity: .capturing(.recording)) == nil, "окно или область ещё выбираются")
-        #expect(StatusBarButton.stopItem(activity: .capturing(.area)) == nil)
-        #expect(StatusBarButton.stopItem(activity: .pickingColor) == nil)
-    }
 }
