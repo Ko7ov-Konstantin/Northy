@@ -353,8 +353,10 @@ final class SettingsWindowController {
             window.center()
             self.window = window
         }
-        // Accessory-приложение без активации покажет окно позади остальных.
-        NSApp.activate()
+        // NSApp.activate() — лишь просьба: из меню строки состояния, пока активно чужое
+        // приложение, macOS её не исполняет, и окно остаётся позади без фокуса.
+        NSApp.activate(ignoringOtherApps: true)
         window?.makeKeyAndOrderFront(nil)
+        window?.orderFrontRegardless()
     }
 }
