@@ -14,8 +14,14 @@ final class ShelfStore {
     /// Сюда DropContainerView принимает file promise (скриншоты): эти копии
     /// принадлежат приложению и удаляются вместе с записью на полке.
     private let dropsDirectory: URL
+    private let trash: (URL) throws -> Void
 
-    init(directory: URL = AppData.directory, dropsDirectory: URL = AppData.dropsDirectory) {
+    init(
+        directory: URL = AppData.directory,
+        dropsDirectory: URL = AppData.dropsDirectory,
+        trash: @escaping (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) }
+    ) {
+        self.trash = trash
         store = JSONStore(url: directory.appendingPathComponent("shelf.json"))
         datesStore = JSONStore(url: directory.appendingPathComponent("shelf-added.json"))
         self.dropsDirectory = dropsDirectory
@@ -66,6 +72,21 @@ final class ShelfStore {
         addedDates[url.path] = nil
         datesStore.write(addedDates)
         deleteIfOwnDrop(url)
+    }
+
+    /// Файл создан Northy (снимок, запись, принятый file promise) и живёт в Drops:
+    /// убрать его с полки значит удалить с диска.
+    func ownsFile(_ url: URL) -> Bool {
+        dropSession(of: url) != nil
+    }
+
+    /// Файл — в Корзину и с полки. false — перенести не удалось, запись остаётся.
+    func moveToTrash(_ url: URL) -> Bool {
+        if FileManager.default.fileExists(atPath: url.path) {
+            do { try trash(url) } catch { return false }
+        }
+        remove(url)
+        return true
     }
 
     func clear() {

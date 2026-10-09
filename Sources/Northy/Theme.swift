@@ -19,6 +19,7 @@ enum Theme {
     static let mint = Color(red: 0.36, green: 0.9, blue: 0.62)
     static let danger = Color(red: 1.0, green: 0.36, blue: 0.36)
     static let rose = Color(red: 1.0, green: 0.5, blue: 0.62)
+    static let teal = Color(red: 0.3, green: 0.84, blue: 0.88)
 
     static let expandSpring = Animation.spring(response: 0.42, dampingFraction: 0.78)
     static let collapseAnimation = Animation.smooth(duration: 0.3)
@@ -33,6 +34,7 @@ extension PanelTab {
         case .translator: Theme.violet
         case .limits: Theme.rose
         case .music: Theme.mint
+        case .tools: Theme.teal
         }
     }
 }

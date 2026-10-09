@@ -33,6 +33,7 @@ final class PanelUIState {
     @ObservationIgnored var onResize: ((CGSize) -> Void)?
     @ObservationIgnored var onResizeEnded: (() -> Void)?
     @ObservationIgnored var onOpenSettings: (() -> Void)?
+    @ObservationIgnored var onRefreshLimits: (() -> Void)?
 }
 
 /// Рекурсивно снимает регистрацию dragged types у вью и всех его потомков.
@@ -115,13 +116,37 @@ final class PanelController: NSObject {
     let clipboardStore = ClipboardStore()
     let shelfStore = ShelfStore()
     let limitsStore = LimitsStore(source: ClaudeWebLimitsSource(), history: UsageHistory())
+    let zaiKeys = ZaiKeyStore()
+    private(set) lazy var glmStore = LimitsStore(source: ZaiLimitsSource(keys: zaiKeys))
+    /// Пункты меню выбранной вкладки: свои у Claude и у GLM.
+    private var glmMenuItems: [NSMenuItem] = []
+    private var claudeMenuItems: [NSMenuItem] = []
+    private var limitsCardItem: NSMenuItem?
+    private var claudeCardSubmenu: NSMenu?
+    private var claudeWasShown = true
+
+    private var limitsProviders: [LimitsProvider] {
+        LimitsProvider.available(blocks: settings.limitsBlocks, hasGLMKey: zaiKeys.hasKey)
+    }
+    /// Скрытый блок «Лимиты Claude» — Northy не ходит на claude.ai.
+    private var claudeShown: Bool { settings.limitsBlocks.contains(.claudeLimits) }
+    private var glmWanted: Bool { zaiKeys.hasKey && settings.limitsBlocks.contains { $0.provider == .glm } }
+    private var tokenLogsWanted: Bool { claudeShown || settings.limitsBlocks.contains(where: \.needsTokenLogs) }
     let tokenStore = TokenStatsStore()
     let settings = AppSettings()
+    private(set) lazy var toolsStore = ToolsStore(shelf: shelfStore, settings: settings)
+    private lazy var chatWindow = ChatWindowController { [unowned self] in ClaudeChatStore(settings: settings) }
     private let hotKey = GlobalHotKey()
     private let diskAccessGuide = DiskAccessGuide()
     private var tabsObserved = false
     private lazy var settingsWindow = SettingsWindowController { [unowned self] in
-        SettingsView(settings: settings) { [weak self] in self?.clipboardStore.clear() }
+        SettingsView(
+            settings: settings,
+            zaiKeys: zaiKeys,
+            glm: glmStore,
+            tokenStore: tokenStore,
+            onZaiKeyChanged: { [weak self] in self?.zaiKeyChanged() }
+        ) { [weak self] in self?.clipboardStore.clear() }
     }
 
     private var collapseWorkItem: DispatchWorkItem?
@@ -132,6 +157,8 @@ final class PanelController: NSObject {
     private var expandWorkItem: DispatchWorkItem?
     private var dragMonitor: Any?
     private var statusItem: NSStatusItem?
+    /// Отдельный значок «стоп» в строке меню — только пока идёт запись экрана.
+    private var recordingStopItem: NSStatusItem?
     private static let collapseDelay: TimeInterval = 0.35
     /// Пауза перед разворотом по наведению: курсор, идущий к пунктам меню-бара
     /// мимо выреза, не должен раскрывать панель на пол-экрана.
@@ -141,6 +168,8 @@ final class PanelController: NSObject {
 
     /// Вызывается при завершении приложения: debounced-записи — на диск.
     func flushStores() {
+        toolsStore.finishForTermination()
+        chatWindow.store?.stopForTermination()
         clipboardStore.flush()
         shelfStore.flush()
         limitsStore.history?.flush()
@@ -172,13 +201,24 @@ final class PanelController: NSObject {
         uiState.onResize = { [weak self] size in self?.resizePanel(to: size) }
         uiState.onResizeEnded = { [weak self] in self?.finishResize() }
         uiState.onOpenSettings = { [weak self] in self?.openSettings() }
+        uiState.onRefreshLimits = { [weak self] in self?.refreshEverything(force: true) }
+        toolsStore.hidePanel = { [weak self] in await self?.hideForCapture() }
+        toolsStore.onShelfAdded = { [weak self] in self?.showShelfBriefly() }
+        toolsStore.openChat = { [weak self] in
+            self?.collapse()
+            self?.chatWindow.show()
+        }
 
         let rootView = PanelRootView(
             uiState: uiState,
             clipboardStore: clipboardStore,
             shelfStore: shelfStore,
             limitsStore: limitsStore,
-            tokenStore: tokenStore
+            glmStore: glmStore,
+            tokenStore: tokenStore,
+            settings: settings,
+            zaiKeys: zaiKeys,
+            toolsStore: toolsStore
         )
         let hostingView = TrackingHostingView(rootView: rootView)
         hostingView.onMouseEntered = { [weak self] in self?.handleMouseEntered() }
@@ -256,6 +296,8 @@ final class PanelController: NSObject {
         observeHotKeySetting()
         observeClipboardLimit()
         observeEnabledTabs()
+        claudeWasShown = claudeShown
+        observeLimitsBlocks()
         startFinderBridge()
     }
 
@@ -268,7 +310,7 @@ final class PanelController: NSObject {
         menu.delegate = self
 
         // Карточка лимитов, как у CodexBar: SwiftUI-вью прямо в меню, следит за LimitsStore сама.
-        let card = NSHostingView(rootView: LimitsMenuCard(store: limitsStore, tokens: tokenStore))
+        let card = NSHostingView(rootView: LimitsMenuCard(store: limitsStore, glm: glmStore, tokens: tokenStore, settings: settings, zaiKeys: zaiKeys))
         card.sizingOptions = [.intrinsicContentSize]
         card.frame.size = card.fittingSize
         limitsCard = card
@@ -276,9 +318,12 @@ final class PanelController: NSObject {
         cardItem.view = card
         // Наведение на карточку раскрывает график стоимости сбоку — как у CodexBar.
         let cardTokens = tokenStore
-        cardItem.submenu = chartSubmenu {
+        let cardSubmenu = chartSubmenu {
             DailyUsageChart(stats: cardTokens.stats(for: nil))
         }
+        cardItem.submenu = cardSubmenu
+        claudeCardSubmenu = cardSubmenu
+        limitsCardItem = cardItem
         menu.addItem(cardItem)
         menu.addItem(.separator())
 
@@ -294,6 +339,12 @@ final class PanelController: NSObject {
         menu.addItem(chartSubmenuItem(title: "Сессии Claude Code", symbol: "terminal") {
             ClaudeSessionsList(sessions: tokens.sessions, limit: 10)
         })
+        let glm = glmStore
+        let glmTokensItem = chartSubmenuItem(title: "Токены GLM", symbol: "chart.bar") {
+            GLMSeriesMenu(store: glm)
+        }
+        menu.addItem(glmTokensItem)
+        glmMenuItems.append(glmTokensItem)
         menu.addItem(.separator())
 
         let showItem = NSMenuItem(title: "Показать панель", action: #selector(showPanelFromStatusMenu), keyEquivalent: "")
@@ -316,6 +367,12 @@ final class PanelController: NSObject {
         dashboardItem.representedObject = URL(string: "https://claude.ai/settings/usage")
         dashboardItem.image = NSImage(systemSymbolName: "chart.xyaxis.line", accessibilityDescription: nil)
         menu.addItem(dashboardItem)
+        let glmItem = NSMenuItem(title: "Дашборд GLM", action: #selector(openLinkFromStatusMenu(_:)), keyEquivalent: "")
+        glmItem.target = self
+        glmItem.representedObject = ZaiWeb.dashboardURL
+        glmItem.image = NSImage(systemSymbolName: "chart.xyaxis.line", accessibilityDescription: nil)
+        menu.addItem(glmItem)
+        glmMenuItems.append(glmItem)
 
         // Подменю со статусом сервисов Claude — как у CodexBar; заполняется при открытии меню.
         let statusPageItem = NSMenuItem(title: "Страница статуса", action: nil, keyEquivalent: "")
@@ -339,6 +396,8 @@ final class PanelController: NSObject {
         let separatorBeforeSettings = menu.items[menu.index(of: settingsItem) - 1]
         let general: Set<NSMenuItem> = [showItem, separatorBeforeSettings, settingsItem, quitItem]
         limitsMenuItems = menu.items.filter { !general.contains($0) }
+        let claudeTitles: Set = ["Использование плана", "Стоимость", "Сессии Claude Code", "Дашборд использования", "Страница статуса"]
+        claudeMenuItems = menu.items.filter { claudeTitles.contains($0.title) }
 
         statusItem = item
         observeLimits()
@@ -347,9 +406,17 @@ final class PanelController: NSObject {
     /// Значок в строке меню — следом за LimitsStore.
     private func observeLimits() {
         withObservationTracking {
-            let enabled = limitsEnabled
-            updateStatusButton(lines: enabled ? statusBarLines() : [])
-            limitsMenuItems.forEach { $0.isHidden = !enabled }
+            updateStatusButton(lines: StatusBarButton.lines(activity: toolsStore.activity, limits: limitsEnabled ? statusBarLines() : []))
+            updateRecordingStopItem(StatusBarButton.stopItem(activity: toolsStore.activity))
+            // Вкладка меню, как у CodexBar: пункты и подменю — только выбранного источника.
+            let provider = limitsEnabled ? LimitsProvider.resolve(settings.menuProvider, available: limitsProviders) : nil
+            limitsMenuItems.forEach { $0.isHidden = provider == nil }
+            claudeMenuItems.forEach { $0.isHidden = provider != .claude }
+            glmMenuItems.forEach { $0.isHidden = provider != .glm }
+            limitsCardItem?.submenu = provider == .claude ? claudeCardSubmenu : nil
+            _ = glmStore.snapshot
+            _ = glmStore.errorMessage
+            _ = glmStore.isLoading
             // Высота карточки меняется вместе с данными (строки лимитов, ошибка, загрузка).
             _ = limitsStore.errorMessage
             _ = limitsStore.isLoading
@@ -375,9 +442,12 @@ final class PanelController: NSObject {
 
     /// Строки остатка для строки меню. До первого обновления после запуска —
     /// последние известные: при включённых лимитах в строке меню только цифры.
+    /// Источник — первый показываемый: Claude, а если его лимиты скрыты — GLM.
     private func statusBarLines() -> [String] {
-        let key = "statusBar.lastLines"
-        if let lines = limitsStore.snapshot?.statusBarLines, !lines.isEmpty {
+        guard let provider = limitsProviders.first else { return [] }
+        let key = provider == .claude ? "statusBar.lastLines" : "statusBar.lastLines.glm"
+        let store = provider == .claude ? limitsStore : glmStore
+        if let lines = store.snapshot?.statusBarLines, !lines.isEmpty {
             UserDefaults.standard.set(lines, forKey: key)
             return lines
         }
@@ -389,6 +459,27 @@ final class PanelController: NSObject {
         button.title = ""
         button.image = Self.statusImage(lines: lines)
         statusItem?.length = lines.isEmpty ? NSStatusItem.squareLength : NSStatusItem.variableLength
+    }
+
+    private func updateRecordingStopItem(_ isEnabled: Bool?) {
+        guard let isEnabled else {
+            if let item = recordingStopItem { NSStatusBar.system.removeStatusItem(item) }
+            recordingStopItem = nil
+            return
+        }
+        if recordingStopItem == nil {
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+            item.button?.image = NSImage(systemSymbolName: "stop.circle.fill", accessibilityDescription: "Остановить запись")
+            item.button?.toolTip = "Остановить запись"
+            item.button?.target = self
+            item.button?.action = #selector(stopRecordingFromStatusBar)
+            recordingStopItem = item
+        }
+        recordingStopItem?.button?.isEnabled = isEnabled
+    }
+
+    @objc private func stopRecordingFromStatusBar() {
+        toolsStore.stopRecording()
     }
 
     /// Иконка и строки остатка друг под другом (как у CodexBar). Шаблонная
@@ -537,16 +628,53 @@ final class PanelController: NSObject {
     private func refreshEverything(force: Bool) {
         // Модуль выключен — ни claude.ai, ни сканирования логов, ни статуса.
         guard limitsEnabled else { return }
-        Task { await limitsStore.refresh(force: true) }
-        Task { await tokenStore.refresh(force: force) }
-        refreshStatusPage()
+        if claudeShown {
+            Task { await limitsStore.refresh(force: true) }
+            refreshStatusPage()
+        }
+        refreshGLM(force: true)
+        if tokenLogsWanted {
+            Task { await tokenStore.refresh(force: force) }
+        }
+    }
+
+    /// Состав блоков вкладки «Лимиты» изменился: скрытый источник перестаёт
+    /// запрашиваться и забывает цифры, возвращённый — запрашивается заново.
+    private func observeLimitsBlocks() {
+        withObservationTracking {
+            _ = settings.limitsBlocks
+        } onChange: { [weak self] in
+            DispatchQueue.main.async { self?.observeLimitsBlocks() }
+        }
+        if !claudeShown, limitsStore.snapshot != nil || limitsStore.errorMessage != nil { limitsStore.reset() }
+        if !glmWanted, glmStore.snapshot != nil || glmStore.errorMessage != nil { glmStore.reset() }
+        if claudeShown, !claudeWasShown, limitsEnabled { requestDiskAccessIfNeeded() }
+        claudeWasShown = claudeShown
+        refreshLimits()
+    }
+
+    /// GLM запрашивается параллельно с Claude; без ключа Northy к Z.AI не обращается.
+    private func refreshGLM(force: Bool) {
+        guard glmWanted else { return }
+        Task { await glmStore.refresh(force: force) }
+    }
+
+    /// Ключ Z.AI сохранён или удалён в настройках: новый сразу проверяется запросом.
+    private func zaiKeyChanged() {
+        glmStore.reset()
+        refreshGLM(force: true)
     }
 
     /// Лимиты обновляются только по открытию панели или меню, без фонового опроса.
     private func refreshLimits() {
         guard uiState.enabledTabs.contains(.limits) else { return }
-        Task { await limitsStore.refresh() }
-        Task { await tokenStore.refresh() }
+        if claudeShown {
+            Task { await limitsStore.refresh() }
+        }
+        refreshGLM(force: false)
+        if tokenLogsWanted {
+            Task { await tokenStore.refresh() }
+        }
     }
 
     @objc private func showPanelFromStatusMenu() {
@@ -690,6 +818,13 @@ final class PanelController: NSObject {
         }
     }
 
+    /// Панель не должна попасть в кадр: сворачивается, пауза — на анимацию свёртывания.
+    private func hideForCapture() async {
+        guard uiState.isExpanded else { return }
+        collapse()
+        try? await Task.sleep(for: .milliseconds(450))
+    }
+
     /// Вкладки из настроек; открытая, но выключенная вкладка сменяется «Буфером».
     private func observeEnabledTabs() {
         let enabled = withObservationTracking {
@@ -700,7 +835,7 @@ final class PanelController: NSObject {
         let limitsTurnedOn = tabsObserved && enabled.contains(.limits) && !uiState.enabledTabs.contains(.limits)
         tabsObserved = true
         uiState.enabledTabs = enabled
-        if limitsTurnedOn { requestDiskAccessIfNeeded() }
+        if limitsTurnedOn, claudeShown { requestDiskAccessIfNeeded() }
         let resolved = PanelTab.resolve(uiState.selectedTab, enabled: enabled)
         if resolved != uiState.selectedTab {
             withAnimation(Theme.tabSpring) { uiState.selectedTab = resolved }

@@ -67,6 +67,67 @@ struct ShelfStoreTests {
         #expect(FileManager.default.fileExists(atPath: userFile.path), "полка удаляет только свои дропы")
     }
 
+    @Test func trashingMovesFileToTrashAndOffShelf() throws {
+        let root = tempDirectory()
+        let userFile = root.appendingPathComponent("запись.mov")
+        try Data([1]).write(to: userFile)
+        var trashed: [URL] = []
+        let store = ShelfStore(directory: root, dropsDirectory: root.appendingPathComponent("Drops"), trash: { trashed.append($0) })
+        store.add([userFile, url("/tmp/other")])
+
+        #expect(store.moveToTrash(userFile))
+        #expect(trashed.map(\.path) == [userFile.path])
+        #expect(store.files.map(\.path) == ["/tmp/other"], "соседний файл остаётся на полке")
+    }
+
+    @Test func failedTrashKeepsFileOnShelf() throws {
+        struct Refused: Error {}
+        let root = tempDirectory()
+        let userFile = root.appendingPathComponent("запись.mov")
+        try Data([1]).write(to: userFile)
+        let store = ShelfStore(directory: root, dropsDirectory: root.appendingPathComponent("Drops"), trash: { _ in throw Refused() })
+        store.add([userFile])
+
+        #expect(!store.moveToTrash(userFile))
+        #expect(store.files.map(\.path) == [userFile.path])
+    }
+
+    @Test func trashingMissingFileJustLeavesShelf() {
+        let root = tempDirectory()
+        let missing = root.appendingPathComponent("нет.png")
+        var trashed: [URL] = []
+        let store = ShelfStore(directory: root, dropsDirectory: root.appendingPathComponent("Drops"), trash: { trashed.append($0) })
+        store.add([missing])
+
+        #expect(store.moveToTrash(missing))
+        #expect(trashed.isEmpty)
+        #expect(store.files.isEmpty)
+    }
+
+    @Test func trashingDropRemovesSessionFolder() throws {
+        let root = tempDirectory()
+        let drops = root.appendingPathComponent("Drops", isDirectory: true)
+        let file = try makeDrop(in: drops, name: "Снимок экрана.png")
+        let store = ShelfStore(directory: root, dropsDirectory: drops, trash: { try FileManager.default.removeItem(at: $0) })
+        store.add([file])
+
+        #expect(store.moveToTrash(file))
+        #expect(!FileManager.default.fileExists(atPath: file.deletingLastPathComponent().path))
+    }
+
+    @Test func ownsOnlyFilesInsideDrops() throws {
+        let root = tempDirectory()
+        let drops = root.appendingPathComponent("Drops", isDirectory: true)
+        let made = try makeDrop(in: drops, name: "Запись.mov")
+        let userFile = root.appendingPathComponent("документ.txt")
+        try Data([1]).write(to: userFile)
+        let store = ShelfStore(directory: root, dropsDirectory: drops)
+        store.add([made, userFile])
+
+        #expect(store.ownsFile(made), "снимок или запись Northy")
+        #expect(!store.ownsFile(userFile), "файл, перетащенный пользователем")
+    }
+
     @Test func clearDeletesDrops() throws {
         let root = tempDirectory()
         let drops = root.appendingPathComponent("Drops", isDirectory: true)

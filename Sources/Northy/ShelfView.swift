@@ -13,8 +13,12 @@ struct ShelfView: View {
             ScrollView {
                 LazyVGrid(columns: columns, spacing: 8) {
                     ForEach(store.files, id: \.path) { url in
-                        ShelfTile(url: url, siblings: store.files) {
+                        ShelfTile(url: url, siblings: store.files, owned: store.ownsFile(url)) {
                             withAnimation(Theme.tabSpring) { store.remove(url) }
+                        } onTrash: {
+                            withAnimation(Theme.tabSpring) {
+                                if !store.moveToTrash(url) { NSSound.beep() }
+                            }
                         }
                         .transition(.scale(scale: 0.8).combined(with: .opacity))
                     }
@@ -42,14 +46,20 @@ private struct ShelfDropZone: View {
 }
 
 /// Плитка файла: большая иконка и имя. Перетаскивается наружу; по наведению —
-/// панель действий: просмотр, «Поделиться», путь в буфер, Finder, убрать.
+/// панель действий: просмотр, «Поделиться», путь в буфер, Finder, в Корзину, убрать.
 private struct ShelfTile: View {
     let url: URL
     /// Все файлы полки — быстрый просмотр листает их стрелками.
     let siblings: [URL]
+    /// Файл Northy: отдельного «убрать с полки» нет, удаление — сразу с диска.
+    let owned: Bool
     let onRemove: () -> Void
+    let onTrash: () -> Void
+
+    private static let actionSize: CGFloat = 19
 
     @State private var isHovering = false
+    @State private var confirmsTrash = false
     @State private var spot = PointerSpot()
     @Environment(\.hoverGlowEnabled) private var glowEnabled
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -113,20 +123,35 @@ private struct ShelfTile: View {
         .background(Self.shape.fill(isHovering ? Theme.cardHover : Theme.card))
         .overlay(alignment: .top) {
             HStack(spacing: 0) {
-                if fileExists {
-                    IconButton(systemName: "eye", size: 20, help: "Быстрый просмотр") {
-                        QuickLook.shared.show(url, among: siblings)
+                if confirmsTrash {
+                    Text("В Корзину?")
+                        .font(.system(size: 10.5, weight: .semibold))
+                        .foregroundStyle(Theme.primaryText)
+                        .padding(.leading, 6)
+                    Spacer(minLength: 0)
+                    IconButton(systemName: "checkmark", hoverTint: .red, size: Self.actionSize, help: "Удалить файл с диска", action: onTrash)
+                    IconButton(systemName: "xmark", size: Self.actionSize, help: "Не удалять") { confirmsTrash = false }
+                } else {
+                    if fileExists {
+                        IconButton(systemName: "eye", size: Self.actionSize, help: "Быстрый просмотр") {
+                            QuickLook.shared.show(url, among: siblings)
+                        }
+                        ShareButton(url: url, size: Self.actionSize)
+                        IconButton(systemName: "doc.on.doc", size: Self.actionSize, help: "Скопировать путь") {
+                            FileActions.copyPath(url)
+                        }
+                        IconButton(systemName: "folder", size: Self.actionSize, help: "Показать в Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([url])
+                        }
+                        IconButton(systemName: "trash", hoverTint: .red, size: Self.actionSize, help: "Удалить файл с диска — в Корзину") {
+                            confirmsTrash = true
+                        }
                     }
-                    ShareButton(url: url)
-                    IconButton(systemName: "doc.on.doc", size: 20, help: "Скопировать путь") {
-                        FileActions.copyPath(url)
-                    }
-                    IconButton(systemName: "folder", size: 20, help: "Показать в Finder") {
-                        NSWorkspace.shared.activateFileViewerSelecting([url])
+                    Spacer(minLength: 0)
+                    if !owned || !fileExists {
+                        IconButton(systemName: "xmark", size: Self.actionSize, help: "Убрать с полки", action: onRemove)
                     }
                 }
-                Spacer(minLength: 0)
-                IconButton(systemName: "xmark", size: 20, help: "Убрать с полки", action: onRemove)
             }
             .padding(3)
             .background(
@@ -142,7 +167,10 @@ private struct ShelfTile: View {
             fileExists = FileManager.default.fileExists(atPath: url.path)
             fileIcon = NSWorkspace.shared.icon(forFile: url.path)
         }
-        .onHover { isHovering = $0 && glowEnabled }
+        .onHover {
+            isHovering = $0 && glowEnabled
+            if !$0 { confirmsTrash = false }
+        }
         .onContinuousHover { phase in
             guard glowEnabled, case .active(let point) = phase else {
                 spot.location = nil

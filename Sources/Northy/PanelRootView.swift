@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum PanelTab: String, CaseIterable, Identifiable, Hashable {
-    case clipboard, files, translator, limits, music
+    case clipboard, files, translator, limits, music, tools
 
     var id: Self { self }
 
@@ -24,6 +24,7 @@ enum PanelTab: String, CaseIterable, Identifiable, Hashable {
         case .translator: "Переводчик"
         case .limits: "Лимиты"
         case .music: "Музыка"
+        case .tools: "Инструменты"
         }
     }
 
@@ -34,6 +35,7 @@ enum PanelTab: String, CaseIterable, Identifiable, Hashable {
         case .translator: "character.bubble"
         case .limits: "gauge.with.dots.needle.50percent"
         case .music: "music.note"
+        case .tools: "wrench.and.screwdriver"
         }
     }
 
@@ -58,7 +60,11 @@ struct PanelRootView: View {
     var clipboardStore: ClipboardStore
     var shelfStore: ShelfStore
     var limitsStore: LimitsStore
+    var glmStore: LimitsStore
     var tokenStore: TokenStatsStore
+    var settings: AppSettings
+    var zaiKeys: ZaiKeyStore
+    var toolsStore: ToolsStore
 
     private static let earRadius: CGFloat = 12
     private static let bottomRadius: CGFloat = 30
@@ -127,13 +133,22 @@ struct PanelRootView: View {
         }
     }
 
+    /// Кольца в шапке — по первому показываемому источнику: Claude, а если он скрыт — GLM.
+    private var headerLimitsStore: LimitsStore? {
+        switch LimitsProvider.available(blocks: settings.limitsBlocks, hasGLMKey: zaiKeys.hasKey).first {
+        case .claude: limitsStore
+        case .glm: glmStore
+        case nil: nil
+        }
+    }
+
     private var expandedContent: some View {
         VStack(spacing: 0) {
             HeaderBar(
                 uiState: uiState,
                 clipboardStore: clipboardStore,
                 shelfStore: shelfStore,
-                limitsStore: limitsStore
+                limitsStore: headerLimitsStore
             )
             .padding(.horizontal, Self.earRadius + 10)
             .frame(height: max(uiState.topInset, 38))
@@ -148,10 +163,13 @@ struct PanelRootView: View {
                     tabLayer(.translator) { TranslatorView() }
                 }
                 if uiState.enabledTabs.contains(.limits) {
-                    tabLayer(.limits) { LimitsView(store: limitsStore, tokens: tokenStore) }
+                    tabLayer(.limits) { LimitsView(store: limitsStore, glm: glmStore, tokens: tokenStore, settings: settings, uiState: uiState) }
                 }
                 if uiState.enabledTabs.contains(.music) {
                     tabLayer(.music) { MusicView() }
+                }
+                if uiState.enabledTabs.contains(.tools) {
+                    tabLayer(.tools) { ToolsView(store: toolsStore) }
                 }
             }
             .padding(.horizontal, Self.earRadius + 12)
@@ -194,22 +212,40 @@ private struct HeaderBar: View {
     var uiState: PanelUIState
     var clipboardStore: ClipboardStore
     var shelfStore: ShelfStore
-    var limitsStore: LimitsStore
+    var limitsStore: LimitsStore?
 
     @Namespace private var pillNamespace
+    @State private var headerWidth: CGFloat = 0
+
+    private var earWidth: CGFloat? {
+        NotchGeometry.leftEarWidth(headerWidth: headerWidth, notchWidth: uiState.notchWidth)
+    }
+
+    /// Первый вариант, что помещается в ухо: выбранная с названием, иначе все значками.
+    private var tabs: some View {
+        ViewThatFits(in: .horizontal) {
+            tabRow(showTitle: true)
+            tabRow(showTitle: false)
+        }
+        .frame(maxWidth: earWidth ?? .infinity, alignment: .leading)
+    }
+
+    private func tabRow(showTitle: Bool) -> some View {
+        HStack(spacing: 4) {
+            ForEach(PanelTab.visible(enabled: uiState.enabledTabs)) { tab in
+                TabPill(tab: tab, isSelected: uiState.selectedTab == tab, showTitle: showTitle, namespace: pillNamespace) {
+                    withAnimation(Theme.tabSpring) { uiState.selectedTab = tab }
+                }
+            }
+        }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
-            HStack(spacing: 4) {
-                ForEach(PanelTab.visible(enabled: uiState.enabledTabs)) { tab in
-                    TabPill(tab: tab, isSelected: uiState.selectedTab == tab, namespace: pillNamespace) {
-                        withAnimation(Theme.tabSpring) { uiState.selectedTab = tab }
-                    }
-                }
-            }
+            tabs
             Spacer(minLength: uiState.notchWidth + 16)
             HStack(spacing: 6) {
-                if uiState.enabledTabs.contains(.limits) {
+                if uiState.enabledTabs.contains(.limits), let limitsStore {
                     LimitsBadge(store: limitsStore) {
                         withAnimation(Theme.tabSpring) { uiState.selectedTab = .limits }
                     }
@@ -223,6 +259,7 @@ private struct HeaderBar: View {
                 }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { headerWidth = $0 }
     }
 
     @ViewBuilder
@@ -238,7 +275,7 @@ private struct HeaderBar: View {
                 CountBadge(text: "\(shelfStore.files.count)", tint: Theme.amber)
                 ConfirmClearButton { withAnimation(Theme.tabSpring) { shelfStore.clear() } }
             }
-        case .translator, .limits, .music:
+        case .translator, .limits, .music, .tools:
             EmptyView()
         }
     }
@@ -331,6 +368,7 @@ private struct CountBadge: View {
 private struct TabPill: View {
     let tab: PanelTab
     let isSelected: Bool
+    let showTitle: Bool
     let namespace: Namespace.ID
     let action: () -> Void
 
@@ -352,7 +390,7 @@ private struct TabPill: View {
                     .animation(lit ? Hover.enter : Hover.exit) {
                         $0.scaleEffect(lit && !reduceMotion ? 1.12 : 1)
                     }
-                if isSelected {
+                if isSelected && showTitle {
                     Text(tab.title)
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundStyle(Theme.primaryText)

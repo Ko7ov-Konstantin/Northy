@@ -56,8 +56,7 @@ struct MusicPlayerTests {
         #expect(!MusicPlayer.isAllowed(URL(string: "https://music.youtube.com.evil.com/")!))
     }
 
-    @Test func musicTabIsLastAndOptional() throws {
-        #expect(PanelTab.allCases.last == .music)
+    @Test func musicTabIsOptional() throws {
         #expect(PanelTab.music.title == "Музыка")
         let suite = "NorthyTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))

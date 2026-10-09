@@ -25,6 +25,13 @@ enum AppData {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
+
+    /// Чат «Задать вопрос»: история и рабочий каталог запуска `claude`.
+    static var chatDirectory: URL {
+        let dir = directory.appendingPathComponent("Chat", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
 }
 
 /// JSON-файл с дебаунсом записи: изменения истории приходят пачками (каждое

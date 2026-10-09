@@ -9,16 +9,21 @@ nonisolated struct UsageWindow: Equatable, Sendable {
         case weekly
         /// Недельный лимит отдельной модели (Fable, Sonnet…).
         case model(String)
+        /// Окно со своей подписью и длительностью (GLM: месячный лимит MCP и т. п.).
+        case custom(String)
     }
 
     let kind: Kind
     let percent: Double
     let resetsAt: Date?
+    /// Длина окна; по умолчанию — по виду: 5 часов у сеанса, неделя у остальных.
+    let duration: TimeInterval
 
-    init(kind: Kind, percent: Double, resetsAt: Date?) {
+    init(kind: Kind, percent: Double, resetsAt: Date?, duration: TimeInterval? = nil) {
         self.kind = kind
         self.percent = min(100, max(0, percent))
         self.resetsAt = resetsAt
+        self.duration = duration ?? UsagePace.duration(of: kind)
     }
 
     var remaining: Int { 100 - Int(percent.rounded()) }
@@ -28,6 +33,7 @@ nonisolated struct UsageWindow: Equatable, Sendable {
         case .session: "5 часов"
         case .weekly: "Неделя · все модели"
         case .model(let name): "Неделя · \(name)"
+        case .custom(let name): name
         }
     }
 
@@ -36,9 +42,33 @@ nonisolated struct UsageWindow: Equatable, Sendable {
         switch kind {
         case .session: "5ч"
         case .weekly: "7д"
-        case .model(let name): name
+        case .model(let name), .custom(let name): name
         }
     }
+}
+
+/// Строка справки под лимитами: «Квота MCP — 22% использовано — лимит 1000».
+nonisolated struct UsageDetail: Equatable, Sendable {
+    let label: String
+    let value: String
+    var note: String? = nil
+}
+
+/// Расход токенов по времени и по моделям — для графика.
+nonisolated struct UsageSeries: Equatable, Sendable {
+    struct Point: Equatable, Sendable {
+        let label: String
+        let value: Int
+    }
+
+    struct Total: Equatable, Sendable {
+        let name: String
+        let tokens: Int
+    }
+
+    let title: String
+    let points: [Point]
+    let totals: [Total]
 }
 
 nonisolated struct UsageSnapshot: Equatable, Sendable {
@@ -46,6 +76,11 @@ nonisolated struct UsageSnapshot: Equatable, Sendable {
     let fetchedAt: Date
     /// План подписки («Max 20x»), если claude.ai его отдал.
     var plan: String? = nil
+    /// Справочные строки и графики источника; у Claude пусто.
+    var details: [UsageDetail] = []
+    var series: [UsageSeries] = []
+    /// Тариф GLM считает кредиты: в пиковое время списание вдвое дороже.
+    var usesCredits = false
 
     /// Главное число для строки меню и шапки: сессия, а без неё — неделя.
     var headline: UsageWindow? {
@@ -102,6 +137,8 @@ final class LimitsStore {
 
     private let minInterval: TimeInterval
     private var lastAttempt: Date?
+    /// Растёт при reset(): ответ запроса, начатого до сброса, отбрасывается.
+    private var generation = 0
 
     init(source: any LimitsSource = UnconfiguredLimitsSource(), minInterval: TimeInterval = 60, history: UsageHistory? = nil) {
         self.source = source
@@ -109,18 +146,35 @@ final class LimitsStore {
         self.minInterval = minInterval
     }
 
+    /// Источник отключён (ключ удалён) — прежние цифры и ошибка больше не показываются.
+    func reset() {
+        generation += 1
+        snapshot = nil
+        errorMessage = nil
+        lastAttempt = nil
+        isLoading = false
+    }
+
     func refresh(force: Bool = false) async {
         guard !isLoading else { return }
         if !force, let lastAttempt, Date().timeIntervalSince(lastAttempt) < minInterval { return }
         lastAttempt = Date()
         isLoading = true
-        defer { isLoading = false }
+        let started = generation
+        let result: Result<UsageSnapshot, Error>
         do {
-            let fresh = try await source.fetch()
+            result = .success(try await source.fetch())
+        } catch {
+            result = .failure(error)
+        }
+        guard started == generation else { return }
+        isLoading = false
+        switch result {
+        case .success(let fresh):
             snapshot = fresh
             history?.record(fresh)
             errorMessage = nil
-        } catch {
+        case .failure(let error):
             errorMessage = error.localizedDescription
         }
     }
@@ -140,7 +194,7 @@ nonisolated struct UsagePace: Equatable, Sendable {
 
     static func make(for window: UsageWindow, now: Date = .now) -> UsagePace? {
         guard let resetsAt = window.resetsAt else { return nil }
-        let duration = duration(of: window.kind)
+        let duration = window.duration
         let untilReset = resetsAt.timeIntervalSince(now)
         guard untilReset > 0, untilReset <= duration else { return nil }
         let elapsed = min(duration, max(0, duration - untilReset))

@@ -69,6 +69,13 @@ enum NotchGeometry {
         return CGRect(x: x, y: screenTop - height, width: width, height: height)
     }
 
+    /// Ширина левого «уха» шапки: панель центрирована по вырезу, поэтому слева от него
+    /// ровно (ширина шапки − вырез) / 2, минус зазор до выреза. Без выреза — nil (ограничения нет).
+    static func leftEarWidth(headerWidth: CGFloat, notchWidth: CGFloat, gap: CGFloat = 8) -> CGFloat? {
+        guard notchWidth > 0 else { return nil }
+        return max(0, (headerWidth - notchWidth) / 2 - gap)
+    }
+
     /// Свёрнутый фрейм — только мёртвая зона выреза плюс небольшой запас вниз.
     static func collapsedFrame() -> CGRect {
         collapsedFrame(

@@ -19,7 +19,7 @@ nonisolated struct ClaudeSession: Equatable, Identifiable, Sendable {
 nonisolated enum ClaudeSessions {
     static let window: TimeInterval = 24 * 3600
 
-    static func make(rows: [TokenUsageScanner.Row], now: Date = .now, calendar: Calendar = .current) -> [ClaudeSession] {
+    static func make(rows: [TokenUsageScanner.Row], now: Date = .now, calendar: Calendar = .current, prices: [String: TokenPricing.Rates] = [:]) -> [ClaudeSession] {
         let todayStart = calendar.startOfDay(for: now)
         let recent = rows.filter { $0.sessionID != nil && $0.timestamp <= now && now.timeIntervalSince($0.timestamp) <= window }
         let bySession = Dictionary(grouping: recent) { $0.sessionID ?? "" }
@@ -33,7 +33,7 @@ nonisolated enum ClaudeSessions {
                 model: last.model,
                 lastActivity: last.timestamp,
                 todayTokens: today.reduce(0) { $0 + $1.tokens },
-                todayCost: today.reduce(0) { $0 + ($1.cost ?? 0) }
+                todayCost: today.reduce(0) { $0 + (TokenPricing.cost(model: $1.model, usage: $1.usage, loaded: prices) ?? 0) }
             )
         }
         .sorted { $0.lastActivity > $1.lastActivity }

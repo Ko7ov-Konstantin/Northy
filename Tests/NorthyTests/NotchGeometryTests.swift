@@ -84,3 +84,18 @@ struct NotchGeometryTests {
         #expect(frame == CGRect(origin: .zero, size: NotchGeometry.expandedContentSize))
     }
 }
+
+@MainActor
+struct LeftEarWidthTests {
+    @Test func earIsHalfOfHeaderMinusNotchAndGap() {
+        #expect(NotchGeometry.leftEarWidth(headerWidth: 656, notchWidth: 200) == 220)
+    }
+
+    @Test func noNotchMeansNoLimit() {
+        #expect(NotchGeometry.leftEarWidth(headerWidth: 656, notchWidth: 0) == nil)
+    }
+
+    @Test func narrowPanelNeverGoesNegative() {
+        #expect(NotchGeometry.leftEarWidth(headerWidth: 100, notchWidth: 200) == 0)
+    }
+}

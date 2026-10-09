@@ -66,6 +66,8 @@ cat > "$CONTENTS/Info.plist" <<'EOF'
 	<string>26.0</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Northy записывает звук с микрофона во время записи экрана, если вы это включили.</string>
 </dict>
 </plist>
 EOF

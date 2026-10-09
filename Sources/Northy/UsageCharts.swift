@@ -22,6 +22,103 @@ enum UsageChartStyle {
     }
 }
 
+/// Справочные строки источника: слева название, справа значение и пояснение.
+struct UsageDetailRows: View {
+    let details: [UsageDetail]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(details.enumerated()), id: \.offset) { _, detail in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(detail.label)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    VStack(alignment: .trailing, spacing: 1) {
+                        Text(detail.value).monospacedDigit()
+                        if let note = detail.note {
+                            Text(note)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .font(.system(size: 11))
+            }
+        }
+    }
+}
+
+/// Столбики расхода токенов (по часам или дням) и итог по моделям под ними.
+struct TokenSeriesChart: View {
+    let series: UsageSeries
+    var height: CGFloat = 70
+
+    private static let visibleModels = 4
+
+    @State private var hovered: String?
+
+    var body: some View {
+        let points = series.points
+        let peak = max(points.map(\.value).max() ?? 0, 1)
+        let chosen = points.first { $0.label == hovered } ?? points.last
+
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .bottom, spacing: UsageChartStyle.barSpacing(points.count)) {
+                ForEach(points, id: \.label) { point in
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Theme.mint.opacity(point.label == chosen?.label ? 1 : 0.55))
+                        .frame(height: max(2, height * CGFloat(point.value) / CGFloat(peak)))
+                        .frame(maxWidth: .infinity, maxHeight: height, alignment: .bottom)
+                        .contentShape(Rectangle())
+                        .onHover { if $0 { hovered = point.label } }
+                }
+            }
+            .frame(height: height, alignment: .bottom)
+            if let chosen {
+                Text("\(chosen.label): \(Formatting.tokens(chosen.value))")
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+            }
+            ForEach(series.totals.prefix(Self.visibleModels), id: \.name) { total in
+                HStack {
+                    Text(total.name).lineLimit(1)
+                    Spacer()
+                    Text(Formatting.tokens(total.tokens)).foregroundStyle(.secondary)
+                }
+                .font(.system(size: 11))
+            }
+            if series.totals.count > Self.visibleModels {
+                Text("и ещё \(Formatting.plural(series.totals.count - Self.visibleModels, ("модель", "модели", "моделей")))")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+/// Графики токенов GLM для подменю статус-бара.
+struct GLMSeriesMenu: View {
+    var store: LimitsStore
+
+    var body: some View {
+        let series = store.snapshot?.series ?? []
+        VStack(alignment: .leading, spacing: 14) {
+            if series.isEmpty {
+                Text("Z.AI пока не отдал расход токенов")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(series, id: \.title) { item in
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(item.title).font(.system(size: 12, weight: .semibold))
+                    TokenSeriesChart(series: item)
+                }
+            }
+        }
+    }
+}
+
 /// Сводка как у CodexBar: сегодня, текущее недельное окно и месяц с 1 числа — в $ и токенах.
 struct CostSummaryView: View {
     let stats: TokenStats

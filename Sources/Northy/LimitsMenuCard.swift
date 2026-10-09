@@ -5,44 +5,118 @@ import SwiftUI
 /// светлое или тёмное вместе с системой.
 struct LimitsMenuCard: View {
     var store: LimitsStore
+    var glm: LimitsStore
     var tokens: TokenStatsStore
+    @Bindable var settings: AppSettings
+    var zaiKeys: ZaiKeyStore
 
     @State private var isHovering = false
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
+        let providers = LimitsProvider.available(blocks: settings.limitsBlocks, hasGLMKey: zaiKeys.hasKey)
+        let selected = LimitsProvider.resolve(settings.menuProvider, available: providers)
+        return TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 12) {
-                header(now: context.date)
-                Divider()
-                if let snapshot = store.snapshot {
-                    ForEach(snapshot.windows, id: \.kind) { window in
-                        row(window, now: context.date)
-                    }
-                } else if store.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                        .frame(maxWidth: .infinity)
+                // Вкладки источников, как у CodexBar; с одним источником они не нужны.
+                if providers.count > 1 {
+                    switcher(providers, selected: selected)
                 }
-                tokenSection(now: context.date)
-                if let error = store.errorMessage {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
+                switch selected {
+                case .claude:
+                    header("Claude", store: store, hasSubmenu: true, now: context.date)
+                    Divider()
+                    if let snapshot = store.snapshot {
+                        ForEach(snapshot.windows, id: \.kind) { window in
+                            row(window, now: context.date)
+                        }
+                    } else if store.isLoading {
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                    }
+                    tokenSection(now: context.date)
+                    errorLabel(store.errorMessage)
+                case .glm:
+                    header("GLM · Z.AI", store: glm, hasSubmenu: false, now: context.date)
+                    Divider()
+                    glmSection(now: context.date)
+                case nil:
+                    Text("Лимиты скрыты — верните блоки во вкладке «Лимиты»")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .padding(.bottom, 6)
             .frame(width: 300, alignment: .leading)
-            // Подсветка при наведении — карточка раскрывает подменю, как обычный пункт.
+            // Подсветка при наведении — карточка Claude раскрывает подменю, как обычный пункт.
             .background(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(Color.accentColor.opacity(isHovering ? 0.12 : 0))
+                    .fill(Color.accentColor.opacity(isHovering && selected == .claude ? 0.12 : 0))
                     .padding(.horizontal, 5)
             )
             .onHover { isHovering = $0 }
         }
+    }
+
+    /// Вкладка на источник: название и полоска остатка главного окна. Клик меню не закрывает.
+    private func switcher(_ providers: [LimitsProvider], selected: LimitsProvider?) -> some View {
+        HStack(spacing: 6) {
+            ForEach(providers, id: \.self) { provider in
+                let isOn = provider == selected
+                let remaining = (provider == .claude ? store : glm).snapshot?.headline?.remaining
+                VStack(spacing: 5) {
+                    Text(provider.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(isOn ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
+                    Capsule().fill(isOn ? Color.white.opacity(0.3) : Color.primary.opacity(0.12))
+                        .overlay(alignment: .leading) {
+                            GeometryReader { proxy in
+                                Capsule().fill(isOn ? Color.white : Color.secondary)
+                                    .frame(width: proxy.size.width * CGFloat(remaining ?? 0) / 100)
+                            }
+                        }
+                        .frame(height: 3)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(isOn ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.primary.opacity(0.06)))
+                )
+                .contentShape(Rectangle())
+                .onTapGesture { settings.menuProvider = provider }
+                .help(remaining.map { "\(provider.title): осталось \($0)%" } ?? provider.title)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func errorLabel(_ error: String?) -> some View {
+        if let error {
+            Label(error, systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// Лимиты GLM Coding Plan: окна, пиковое время и детали квоты.
+    @ViewBuilder
+    private func glmSection(now: Date) -> some View {
+        if let snapshot = glm.snapshot {
+            ForEach(snapshot.windows, id: \.kind) { window in
+                row(window, now: now, forecast: false)
+            }
+            UsageDetailRows(details: [ZaiPeak(now: now).detail(usesCredits: snapshot.usesCredits, now: now)] + snapshot.details)
+        } else if glm.isLoading {
+            ProgressView()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity)
+        }
+        errorLabel(glm.errorMessage)
     }
 
     /// Стоимость и токены по локальным логам Claude Code — как у CodexBar.
@@ -92,16 +166,18 @@ struct LimitsMenuCard: View {
         }
     }
 
-    private func header(now: Date) -> some View {
+    private func header(_ title: String, store: LimitsStore, hasSubmenu: Bool, now: Date) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack {
-                Text("Claude")
+                Text(title)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer()
-                // У карточки есть подменю с графиком стоимости — стрелка, как у обычного пункта.
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                // У карточки Claude есть подменю с графиком стоимости — стрелка, как у обычного пункта.
+                if hasSubmenu {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack {
                 if store.isLoading {
@@ -121,7 +197,8 @@ struct LimitsMenuCard: View {
         }
     }
 
-    private func row(_ window: UsageWindow, now: Date) -> some View {
+    /// forecast — оценка «сколько сеансов осталось» по истории замеров Claude.
+    private func row(_ window: UsageWindow, now: Date, forecast showsForecast: Bool = true) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("\(Self.menuTitle(window)) \(window.remaining)% осталось")
                 .font(.system(size: 12, weight: .semibold))
@@ -144,7 +221,7 @@ struct LimitsMenuCard: View {
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
             }
-            if window.kind == .weekly, let snapshot = store.snapshot,
+            if showsForecast, window.kind == .weekly, let snapshot = store.snapshot,
                let forecast = store.history?.forecast(for: snapshot, now: now) {
                 Text(Self.forecastText(forecast))
                     .font(.system(size: 10.5))
@@ -172,6 +249,7 @@ struct LimitsMenuCard: View {
         case .session: "Сеанс"
         case .weekly: "Недельный"
         case .model(let name): "\(name) за неделю"
+        case .custom(let name): name
         }
     }
 }

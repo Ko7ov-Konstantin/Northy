@@ -11,12 +11,13 @@ nonisolated final class TokenUsageScanner: @unchecked Sendable {
         let key: String?
         let timestamp: Date
         let model: String
-        let tokens: Int
-        /// nil — модель без известной цены.
-        let cost: Double?
+        /// Счётчики, а не готовая стоимость: цены могут прийти из сети уже после разбора лога.
+        let usage: TokenPricing.Usage
         /// Сессия Claude Code и её рабочая папка (cwd) — для списка сессий.
         var sessionID: String? = nil
         var project: String? = nil
+
+        var tokens: Int { usage.total }
     }
 
     private struct CachedFile {
@@ -136,8 +137,7 @@ nonisolated final class TokenUsageScanner: @unchecked Sendable {
                 key = "\(sessionID)|\(messageID)"
             }
         }
-        return Row(key: key, timestamp: timestamp, model: model, tokens: counts.total,
-                   cost: TokenPricing.cost(model: model, usage: counts),
+        return Row(key: key, timestamp: timestamp, model: model, usage: counts,
                    sessionID: object["sessionId"] as? String,
                    project: object["cwd"] as? String)
     }
@@ -196,18 +196,25 @@ nonisolated struct TokenStats: Equatable, Sendable {
         return min(weekAgo, monthStart(now: now, calendar: calendar))
     }
 
-    static func make(rows: [TokenUsageScanner.Row], now: Date, sessionStart: Date?, weekStart: Date?, calendar: Calendar = .current) -> TokenStats {
+    static func make(rows: [TokenUsageScanner.Row], now: Date, sessionStart: Date?, weekStart: Date?, calendar: Calendar = .current, prices: [String: TokenPricing.Rates] = [:]) -> TokenStats {
         let todayStart = calendar.startOfDay(for: now)
         let firstDay = monthStart(now: now, calendar: calendar)
         let dayCount = (calendar.dateComponents([.day], from: firstDay, to: todayStart).day ?? 0) + 1
         let recent = rows.filter { $0.timestamp >= firstDay && $0.timestamp <= now }
+        // Цена ищется один раз на модель, а не на каждую строку лога.
+        let rates = Dictionary(uniqueKeysWithValues: Set(rows.map(\.model)).compactMap { model in
+            TokenPricing.rates(for: model, loaded: prices).map { (model, $0) }
+        })
+        func cost(_ row: TokenUsageScanner.Row) -> Double {
+            rates[row.model].map { TokenPricing.cost(row.usage, rates: $0) } ?? 0
+        }
 
         var perDay: [Date: [String: (tokens: Int, cost: Double)]] = [:]
         var perModel: [String: Int] = [:]
         for row in recent {
             let day = calendar.startOfDay(for: row.timestamp)
             let current = perDay[day, default: [:]][row.model] ?? (0, 0)
-            perDay[day, default: [:]][row.model] = (current.tokens + row.tokens, current.cost + (row.cost ?? 0))
+            perDay[day, default: [:]][row.model] = (current.tokens + row.tokens, current.cost + cost(row))
             perModel[row.model, default: 0] += row.tokens
         }
         let daily = (0..<dayCount).compactMap { offset -> Day? in
@@ -225,7 +232,7 @@ nonisolated struct TokenStats: Equatable, Sendable {
         func window(since start: Date?) -> (tokens: Int, cost: Double)? {
             guard let start else { return nil }
             let inWindow = rows.filter { $0.timestamp >= start && $0.timestamp <= now }
-            return (inWindow.reduce(0) { $0 + $1.tokens }, inWindow.reduce(0) { $0 + ($1.cost ?? 0) })
+            return (inWindow.reduce(0) { $0 + $1.tokens }, inWindow.reduce(0) { $0 + cost($1) })
         }
         let today = daily.last { $0.date == todayStart }
         let week = window(since: weekStart)
@@ -254,14 +261,70 @@ final class TokenStatsStore {
     private(set) var hasScanned = false
     private(set) var isScanning = false
 
-    private let scanner: TokenUsageScanner
-    private var lastScan: Date?
+    /// Цены из сети (или с диска с прошлого раза); пусто — работает встроенная таблица.
+    private(set) var prices: [String: TokenPricing.Rates] = [:]
 
-    init(scanner: TokenUsageScanner = TokenUsageScanner()) {
+    /// Время последней удачной загрузки цен; nil — цены ещё не скачивались.
+    private(set) var pricesFetchedAt: Date?
+    private(set) var isFetchingPrices = false
+    /// Последняя попытка загрузки не удалась (прежние цены остаются в силе).
+    private(set) var priceFetchFailed = false
+
+    private let scanner: TokenUsageScanner
+    private let downloadPrices: @Sendable () async -> [String: TokenPricing.Rates]?
+    private let pricesURL: URL
+    private var lastScan: Date?
+    private var nextPriceCheck = Date.distantPast
+    private(set) var priceTask: Task<Void, Never>?
+
+    init(
+        scanner: TokenUsageScanner = TokenUsageScanner(),
+        downloadPrices: @escaping @Sendable () async -> [String: TokenPricing.Rates]? = { await TokenPricing.download() },
+        pricesURL: URL = TokenPricing.savedURL
+    ) {
         self.scanner = scanner
+        self.downloadPrices = downloadPrices
+        self.pricesURL = pricesURL
+        if let saved = TokenPricing.readSaved(from: pricesURL) {
+            prices = saved.rates
+            pricesFetchedAt = saved.fetchedAt
+            nextPriceCheck = min(saved.fetchedAt, .now) + 24 * 3600
+        }
+    }
+
+    /// Раз в сутки; неудача — повтор не раньше чем через час. Строки хранят счётчики,
+    /// поэтому новые цены видны сразу, без пересканирования логов.
+    private func refreshPricesIfDue(now: Date) {
+        guard now >= nextPriceCheck, !isFetchingPrices else { return }
+        priceTask = Task { await fetchPrices(now: now) }
+    }
+
+    /// Ручное обновление (кнопка в настройках): не смотрит на расписание.
+    func refreshPricesNow(now: Date = .now) async {
+        await fetchPrices(now: now)
+    }
+
+    private func fetchPrices(now: Date) async {
+        guard !isFetchingPrices else { return }
+        isFetchingPrices = true
+        nextPriceCheck = now + 3600
+        defer { isFetchingPrices = false }
+        let download = downloadPrices
+        guard let fresh = await Task.detached(priority: .utility, operation: { await download() }).value else {
+            priceFetchFailed = true
+            return
+        }
+        priceFetchFailed = false
+        nextPriceCheck = now + 24 * 3600
+        prices = fresh
+        pricesFetchedAt = now
+        sessions = ClaudeSessions.make(rows: rows, prices: fresh)
+        let file = pricesURL
+        await Task.detached(priority: .utility) { TokenPricing.write(.init(fetchedAt: now, rates: fresh), to: file) }.value
     }
 
     func refresh(force: Bool = false, now: Date = .now) async {
+        refreshPricesIfDue(now: now)
         guard !isScanning else { return }
         if !force, let lastScan, now.timeIntervalSince(lastScan) < 60 { return }
         lastScan = now
@@ -270,13 +333,13 @@ final class TokenStatsStore {
         let since = TokenStats.scanStart(now: now)
         let scanner = scanner
         rows = await Task.detached(priority: .utility) { scanner.scan(since: since) }.value
-        sessions = ClaudeSessions.make(rows: rows, now: now)
+        sessions = ClaudeSessions.make(rows: rows, now: now, prices: prices)
         hasScanned = true
     }
 
     func stats(for snapshot: UsageSnapshot?, now: Date = .now) -> TokenStats {
         let session = snapshot?.windows.first { $0.kind == .session }?.resetsAt.map { $0 - UsagePace.duration(of: .session) }
         let week = snapshot?.windows.first { $0.kind == .weekly }?.resetsAt.map { $0 - UsagePace.duration(of: .weekly) }
-        return TokenStats.make(rows: rows, now: now, sessionStart: session, weekStart: week)
+        return TokenStats.make(rows: rows, now: now, sessionStart: session, weekStart: week, prices: prices)
     }
 }

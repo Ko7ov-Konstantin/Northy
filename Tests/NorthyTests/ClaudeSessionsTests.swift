@@ -13,13 +13,18 @@ struct ClaudeSessionsTests {
         return calendar
     }
 
-    private func row(_ session: String?, _ minutesAgo: Double, tokens: Int = 100, cost: Double = 1, model: String = "claude-opus-5-5", project: String? = "/Users/me/app") -> TokenUsageScanner.Row {
+    /// Токен вывода стоит $1 — стоимость строки задаётся числом токенов вывода.
+    private let prices = [
+        "claude-opus-5-5": TokenPricing.Rates(input: 0, output: 1_000_000),
+        "claude-sonnet-5": TokenPricing.Rates(input: 0, output: 1_000_000),
+    ]
+
+    private func row(_ session: String?, _ minutesAgo: Double, tokens: Int = 100, cost: Int = 1, model: String = "claude-opus-5-5", project: String? = "/Users/me/app") -> TokenUsageScanner.Row {
         TokenUsageScanner.Row(
             key: UUID().uuidString,
             timestamp: now - minutesAgo * 60,
             model: model,
-            tokens: tokens,
-            cost: cost,
+            usage: .init(input: tokens - cost, output: cost),
             sessionID: session,
             project: project
         )
@@ -33,7 +38,7 @@ struct ClaudeSessionsTests {
             row("c", 60 * 30, project: "/Users/me/old"),   // 30 ч назад — за пределами суток
             row(nil, 1),                                  // без сессии — не показывается
         ]
-        let sessions = ClaudeSessions.make(rows: rows, now: now, calendar: calendar)
+        let sessions = ClaudeSessions.make(rows: rows, now: now, calendar: calendar, prices: prices)
         #expect(sessions.map(\.id) == ["a", "b"])
         let first = sessions[0]
         #expect(first.project == "app")
@@ -49,7 +54,7 @@ struct ClaudeSessionsTests {
     @Test func todayCountsOnlySinceMidnight() {
         // 13 ч назад — вчера (по UTC полночь 12 ч назад), но в пределах суток.
         let rows = [row("a", 13 * 60, tokens: 50, cost: 5), row("a", 10, tokens: 70, cost: 7)]
-        let session = ClaudeSessions.make(rows: rows, now: now, calendar: calendar).first
+        let session = ClaudeSessions.make(rows: rows, now: now, calendar: calendar, prices: prices).first
         #expect(session?.todayCost == 7)
         #expect(session?.todayTokens == 70)
     }

@@ -51,6 +51,24 @@ struct SettingsTests {
         #expect(reloaded.clipboardLimit == 300)
     }
 
+    @Test func recordingAudioDefaultsAndPersistence() throws {
+        let (defaults, suite) = try isolatedDefaults()
+        defer { discardDefaults(defaults, suite: suite) }
+
+        let settings = AppSettings(defaults: defaults)
+        #expect(settings.recordingAudio == RecordingAudio(systemSound: true, microphone: .none), "первый запуск")
+
+        settings.recordingAudio = RecordingAudio(systemSound: false, microphone: .systemDefault)
+        #expect(AppSettings(defaults: defaults).recordingAudio == RecordingAudio(systemSound: false, microphone: .systemDefault))
+
+        // Устройство может называться как угодно — хоть «default».
+        settings.recordingAudio.microphone = .device("default")
+        #expect(AppSettings(defaults: defaults).recordingAudio.microphone == .device("default"))
+
+        settings.recordingAudio.microphone = .none
+        #expect(AppSettings(defaults: defaults).recordingAudio.microphone == RecordingAudio.Microphone.none)
+    }
+
     @Test func launchAtLoginStatusExplained() {
         #expect(LaunchAtLogin.State(status: .enabled) == .enabled)
         #expect(LaunchAtLogin.State(status: .notRegistered) == .disabled)
