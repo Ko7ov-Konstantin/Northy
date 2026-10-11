@@ -19,6 +19,10 @@ enum Theme {
     static let mint = Color(red: 0.36, green: 0.9, blue: 0.62)
     static let danger = Color(red: 1.0, green: 0.36, blue: 0.36)
     static let rose = Color(red: 1.0, green: 0.5, blue: 0.62)
+    /// Горячий красный на конце шкалы лимита.
+    static let ember = Color(red: 1.0, green: 0.27, blue: 0.2)
+    /// К этому тону приглушается начало шкалы лимита.
+    static let gaugeDeep = Color(red: 0.08, green: 0.05, blue: 0.14)
     static let teal = Color(red: 0.3, green: 0.84, blue: 0.88)
 
     static let expandSpring = Animation.spring(response: 0.42, dampingFraction: 0.78)

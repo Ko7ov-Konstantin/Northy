@@ -298,7 +298,7 @@ private struct LimitsBadge: View {
             Button(action: action) {
                 HStack(spacing: 4) {
                     ForEach(Array(windows.enumerated()), id: \.element.kind) { index, window in
-                        UsageRing(percent: Double(window.remaining), color: window.accent, lineWidth: 2)
+                        UsageRing(percent: Double(window.remaining), color: window.gaugeColor, lineWidth: 2)
                             .frame(width: 22, height: 22)
                             .overlay {
                                 Text("\(window.remaining)")

@@ -211,8 +211,11 @@ struct LimitsMenuCard: View {
             GeometryReader { proxy in
                 Capsule().fill(Color.primary.opacity(0.12))
                     .overlay(alignment: .leading) {
-                        Capsule().fill(window.accent)
-                            .frame(width: proxy.size.width * CGFloat(window.remaining) / 100)
+                        Capsule()
+                            .fill(LinearGradient(gradient: window.remainingGradient, startPoint: .leading, endPoint: .trailing))
+                            .mask(alignment: .leading) {
+                                Capsule().frame(width: proxy.size.width * CGFloat(window.remaining) / 100)
+                            }
                     }
             }
             .frame(height: 6)

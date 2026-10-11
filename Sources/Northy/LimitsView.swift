@@ -4,7 +4,34 @@ extension UsageWindow {
     /// Свой цвет у каждого лимита (5 ч, неделя, модель) — одинаковый в шапке,
     /// во вкладке и на полосках; почти исчерпанный лимит краснеет.
     var accent: Color {
-        if UsageLevel(percent: percent) == .critical { return Theme.danger }
+        UsageLevel(percent: percent) == .critical ? Theme.danger : baseColor
+    }
+
+    /// Цвет точки шкалы на отметке `mark` процентов: приглушённый свой цвет в начале,
+    /// полный к середине и красный к 100%.
+    func gaugeColor(at mark: Double) -> Color {
+        UsageTint.warmed(baseColor, by: UsageTint.alarm(percent: mark))
+            .mix(with: Theme.gaugeDeep, by: 1 - UsageTint.vividness(percent: mark))
+    }
+
+    /// Цвет шкалы на текущем расходе — для колец, где градиент не помещается.
+    var gaugeColor: Color { gaugeColor(at: percent) }
+
+    /// Градиент шкалы остатка (меню), от нуля к полному лимиту: бледный свой цвет слева,
+    /// яркий красный справа — те же тона, что у шкалы расхода, только читаются наоборот.
+    var remainingGradient: Gradient {
+        Gradient(colors: stride(from: 0.0, through: 100, by: 2.5).map { left in
+            UsageTint.warmed(baseColor, by: UsageTint.alarm(percent: left))
+                .opacity(UsageTint.remainingVividness(percent: 100 - left))
+        })
+    }
+
+    /// Градиент шкалы от 0 до 100%: цвет зависит от места, а не от расхода.
+    var gaugeGradient: Gradient {
+        Gradient(colors: stride(from: 0.0, through: 100, by: 2.5).map(gaugeColor(at:)))
+    }
+
+    private var baseColor: Color {
         switch kind {
         case .session: return Theme.sky
         case .weekly: return Theme.violet
@@ -14,6 +41,48 @@ extension UsageWindow {
     }
 }
 
+/// Насыщенность и «тревожность» цвета лимита по проценту расхода.
+enum UsageTint {
+    private static let palest = 0.5
+    private static let vividFrom = 40.0
+    private static let palestRemaining = 0.3
+    /// Опорные точки шкалы: отметка в процентах и доля красного на ней.
+    private static let alarmStops: [(mark: Double, share: Double)] = [(0, 0), (25, 0), (50, 0.45), (75, 0.8), (100, 1)]
+
+    /// Доля своего цвета: от приглушённого при 0% до полного к `vividFrom` и дальше.
+    static func vividness(percent: Double) -> Double {
+        palest + (1 - palest) * min(clamped(percent), vividFrom) / vividFrom
+    }
+
+    /// Доля своего цвета у шкалы остатка: полная при нетронутом лимите, бледная при исчерпанном.
+    static func remainingVividness(percent: Double) -> Double {
+        1 - (1 - palestRemaining) * clamped(percent) / 100
+    }
+
+    /// Доля красного: между опорными точками меняется плавно, до первой четверти её нет.
+    static func alarm(percent: Double) -> Double {
+        let mark = clamped(percent)
+        guard let next = alarmStops.firstIndex(where: { $0.mark >= mark }), next > 0 else { return 0 }
+        let (from, to) = (alarmStops[next - 1], alarmStops[next])
+        return from.share + (to.share - from.share) * (mark - from.mark) / (to.mark - from.mark)
+    }
+
+    /// Цвет на пути к красному по цветовому кругу, без серой середины: холодные тона
+    /// идут через фиолетовый и розовый, тёплые — через жёлтый и оранжевый.
+    static func warmed(_ color: Color, by share: Double) -> Color {
+        guard let from = NSColor(color).usingColorSpace(.sRGB), let to = NSColor(Theme.ember).usingColorSpace(.sRGB) else { return color }
+        let target = from.hueComponent > 0.5 ? to.hueComponent + 1 : to.hueComponent
+        let hue = (from.hueComponent + (target - from.hueComponent) * share).truncatingRemainder(dividingBy: 1)
+        return Color(
+            hue: hue,
+            saturation: from.saturationComponent + (to.saturationComponent - from.saturationComponent) * share,
+            brightness: from.brightnessComponent + (to.brightnessComponent - from.brightnessComponent) * share
+        )
+    }
+
+    private static func clamped(_ percent: Double) -> Double { min(max(percent, 0), 100) }
+}
+
 struct LimitsView: View {
     var store: LimitsStore
     /// Лимиты GLM Coding Plan; без ключа Z.AI стор пуст.
@@ -21,6 +90,9 @@ struct LimitsView: View {
     var tokens: TokenStatsStore
     @Bindable var settings: AppSettings
     var uiState: PanelUIState
+
+    /// На столько пламя верхних колец может выйти за верхний край списка.
+    private static let flameHeadroom: CGFloat = 22
 
     /// Режим правки, как у виджетов macOS: крестики на блоках и лоток скрытых.
     @State private var isEditing: Bool
@@ -112,6 +184,8 @@ struct LimitsView: View {
                 .padding(.leading, isEditing ? 8 : 0)
             }
             .scrollIndicators(.automatic)
+            .scrollClipDisabled()
+            .mask { Rectangle().padding(.top, -Self.flameHeadroom) }
         } else if store.isLoading || glm.isLoading || tokens.isScanning {
             ProgressView().controlSize(.small)
         } else {
@@ -411,7 +485,7 @@ private struct RingCard: View {
     var body: some View {
         let color = window.accent
         HStack(spacing: 16) {
-            UsageRing(percent: window.percent, color: color, lineWidth: 9)
+            UsageFireRing(window: window, lineWidth: 9)
                 .frame(width: 84, height: 84)
                 .overlay {
                     Text("\(Int(window.percent.rounded()))%")
@@ -471,8 +545,22 @@ private struct BarRow: View {
             GeometryReader { proxy in
                 Capsule().fill(Color.white.opacity(0.08))
                     .overlay(alignment: .leading) {
-                        Capsule().fill(color)
-                            .frame(width: proxy.size.width * window.percent / 100)
+                        Capsule()
+                            .fill(LinearGradient(gradient: window.gaugeGradient, startPoint: .leading, endPoint: .trailing))
+                            .mask(alignment: .leading) {
+                                Capsule().frame(width: proxy.size.width * window.percent / 100)
+                            }
+                            .shadow(color: window.gaugeColor.opacity(0.7), radius: 4)
+                    }
+                    .overlay {
+                        if window.percent > UsageFlames.startsAt {
+                            // Запас вокруг полоски: пламя выше неё и выходит за её конец.
+                            let room: CGFloat = 60
+                            UsageFlames(window: window, lineWidth: 10, length: proxy.size.width) { mark in
+                                (CGPoint(x: room + proxy.size.width * mark / 100, y: room + proxy.size.height / 2), CGVector(dx: 0, dy: -1))
+                            }
+                            .frame(width: proxy.size.width + room * 2, height: proxy.size.height + room * 2)
+                        }
                     }
             }
             .frame(height: 5)
@@ -501,6 +589,7 @@ struct UsageRing: View {
                 .trim(from: 0, to: percent / 100)
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+                .shadow(color: color.opacity(0.7), radius: lineWidth)
         }
     }
 }
