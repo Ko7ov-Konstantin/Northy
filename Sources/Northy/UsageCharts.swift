@@ -35,11 +35,16 @@ struct UsageDetailRows: View {
                         .lineLimit(1)
                     Spacer(minLength: 8)
                     VStack(alignment: .trailing, spacing: 1) {
-                        Text(detail.value).monospacedDigit()
+                        Text(detail.value)
+                            .monospacedDigit()
+                            .multilineTextAlignment(.trailing)
+                            .fixedSize(horizontal: false, vertical: true)
                         if let note = detail.note {
                             Text(note)
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.trailing)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }

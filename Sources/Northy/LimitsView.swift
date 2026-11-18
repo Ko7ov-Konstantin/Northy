@@ -87,6 +87,8 @@ struct LimitsView: View {
     var store: LimitsStore
     /// Лимиты GLM Coding Plan; без ключа Z.AI стор пуст.
     var glm: LimitsStore
+    /// Лимиты Gemini; без входа Google из Antigravity стор пуст.
+    var gemini: LimitsStore
     var tokens: TokenStatsStore
     @Bindable var settings: AppSettings
     var uiState: PanelUIState
@@ -97,9 +99,10 @@ struct LimitsView: View {
     /// Режим правки, как у виджетов macOS: крестики на блоках и лоток скрытых.
     @State private var isEditing: Bool
 
-    init(store: LimitsStore, glm: LimitsStore, tokens: TokenStatsStore, settings: AppSettings, uiState: PanelUIState, editing: Bool = false) {
+    init(store: LimitsStore, glm: LimitsStore, gemini: LimitsStore, tokens: TokenStatsStore, settings: AppSettings, uiState: PanelUIState, editing: Bool = false) {
         self.store = store
         self.glm = glm
+        self.gemini = gemini
         self.tokens = tokens
         self.settings = settings
         self.uiState = uiState
@@ -128,12 +131,25 @@ struct LimitsView: View {
         switch block {
         case .claudeLimits: store.snapshot != nil || store.errorMessage != nil
         case .glmLimits: glm.snapshot != nil || glm.errorMessage != nil
+        case .geminiLimits: gemini.snapshot != nil || gemini.errorMessage != nil
         case .claudeCost: tokens.hasScanned && tokens.stats(for: store.snapshot).hasUsage
         case .claudeSessions, .claudeDailyCost: tokens.hasScanned
         case .claudePlanHistory: visible.contains(.claudeLimits) || !(store.history?.samples.isEmpty ?? true)
+        // Без ключа Z.AI или входа Google история не накопится — пустой блок не показываем.
+        case .glmPlanHistory, .geminiPlanHistory:
+            hasContent(LimitsBlock.limits(of: block.provider)) || !(self.store(for: block.provider).history?.samples.isEmpty ?? true)
         case .glmDetails: glm.snapshot != nil
+        case .geminiDetails: !(gemini.snapshot?.details.isEmpty ?? true)
         case .glmHourly: series(Self.hourlyTitle) != nil
         case .glmDaily: series(Self.dailyTitle) != nil
+        }
+    }
+
+    private func store(for provider: LimitsProvider) -> LimitsStore {
+        switch provider {
+        case .claude: store
+        case .glm: glm
+        case .gemini: gemini
         }
     }
 
@@ -186,7 +202,7 @@ struct LimitsView: View {
             .scrollIndicators(.automatic)
             .scrollClipDisabled()
             .mask { Rectangle().padding(.top, -Self.flameHeadroom) }
-        } else if store.isLoading || glm.isLoading || tokens.isScanning {
+        } else if store.isLoading || glm.isLoading || gemini.isLoading || tokens.isScanning {
             ProgressView().controlSize(.small)
         } else {
             EmptyStateView(
@@ -250,24 +266,22 @@ struct LimitsView: View {
         } else {
             switch block {
             case .claudeLimits:
-                // Подписи разделов нужны, только когда источников два.
-                if shown.contains(.glmLimits) { providerHeader("Claude", plan: store.snapshot?.plan) }
+                // Подписи разделов нужны, только когда источников несколько.
+                if showsProviderHeaders { providerHeader(LimitsProvider.claude.fullTitle, plan: store.snapshot?.plan) }
                 if let snapshot = store.snapshot {
                     windows(snapshot, now: now)
-                    if let forecast = store.history?.forecast(for: snapshot, now: now) {
-                        Label(LimitsMenuCard.forecastText(forecast), systemImage: "wand.and.stars")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(Theme.secondaryText)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 4)
-                    }
+                    forecastNote(store, snapshot: snapshot, now: now)
                 } else if let error = store.errorMessage {
                     errorNote(error)
                 }
-            case .glmLimits:
-                if shown.contains(.claudeLimits) { providerHeader("GLM · Z.AI", plan: glm.snapshot?.plan) }
-                if let snapshot = glm.snapshot { windows(snapshot, now: now) }
-                if let error = glm.errorMessage { errorNote(error) }
+            case .glmLimits, .geminiLimits:
+                let source = self.store(for: block.provider)
+                if showsProviderHeaders { providerHeader(block.provider.fullTitle, plan: source.snapshot?.plan) }
+                if let snapshot = source.snapshot {
+                    windows(snapshot, now: now)
+                    forecastNote(source, snapshot: snapshot, now: now)
+                }
+                if let error = source.errorMessage { errorNote(error) }
             case .claudeCost:
                 let stats = tokens.stats(for: store.snapshot, now: now)
                 SectionCard {
@@ -292,6 +306,16 @@ struct LimitsView: View {
                 SectionCard(title: "Использование плана") {
                     PlanHistoryChart(samples: store.history?.samples ?? [], height: 80)
                 }
+            case .glmPlanHistory, .geminiPlanHistory:
+                SectionCard(title: block.title) {
+                    PlanHistoryChart(samples: self.store(for: block.provider).history?.samples ?? [], height: 80)
+                }
+            case .geminiDetails:
+                if let snapshot = gemini.snapshot {
+                    SectionCard(title: block.title) {
+                        UsageDetailRows(details: snapshot.details)
+                    }
+                }
             case .glmDetails:
                 if let snapshot = glm.snapshot {
                     // Пиковое время, квоты в числах и расход MCP — состав как у CodexBar.
@@ -315,9 +339,32 @@ struct LimitsView: View {
             Label(block.title, systemImage: block.icon)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.primaryText)
-            Text(block.provider == .glm ? "Появится, когда Z.AI отдаст данные по ключу" : "Пока нет данных")
+            Text(Self.placeholderText(block.provider))
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.tertiaryText)
+        }
+    }
+
+    private static func placeholderText(_ provider: LimitsProvider) -> String {
+        switch provider {
+        case .claude: "Пока нет данных"
+        case .glm: "Появится, когда Z.AI отдаст данные по ключу"
+        case .gemini: "Появится, когда Antigravity отдаст данные о квоте"
+        }
+    }
+
+    private var showsProviderHeaders: Bool {
+        shown.filter { LimitsProvider.allCases.map(LimitsBlock.limits(of:)).contains($0) }.count > 1
+    }
+
+    @ViewBuilder
+    private func forecastNote(_ source: LimitsStore, snapshot: UsageSnapshot, now: Date) -> some View {
+        if let forecast = source.history?.forecast(for: snapshot, now: now) {
+            Label(LimitsMenuCard.forecastText(forecast), systemImage: "wand.and.stars")
+                .font(.system(size: 11.5))
+                .foregroundStyle(Theme.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
         }
     }
 
@@ -429,7 +476,7 @@ struct LimitsView: View {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Theme.amber)
                     .lineLimit(1)
-            } else if let fetchedAt = store.snapshot?.fetchedAt ?? glm.snapshot?.fetchedAt {
+            } else if let fetchedAt = store.snapshot?.fetchedAt ?? glm.snapshot?.fetchedAt ?? gemini.snapshot?.fetchedAt {
                 Text("Обновлено \(Formatting.relative(fetchedAt, now: now))")
                     .foregroundStyle(Theme.tertiaryText)
             }
@@ -442,7 +489,7 @@ struct LimitsView: View {
             ) {
                 withAnimation(Theme.tabSpring) { isEditing.toggle() }
             }
-            if store.isLoading || glm.isLoading {
+            if store.isLoading || glm.isLoading || gemini.isLoading {
                 ProgressView().controlSize(.mini)
             } else {
                 IconButton(systemName: "arrow.clockwise", size: 22, help: "Обновить") {
@@ -462,7 +509,7 @@ private struct BlockChip: View {
     var body: some View {
         HStack(spacing: 6) {
             Image(systemName: block.icon)
-                .foregroundStyle(block.provider == .glm ? Theme.mint : Theme.sky)
+                .foregroundStyle(block.provider.tint)
             Text(block.title)
                 .foregroundStyle(Theme.primaryText)
             if let symbol {

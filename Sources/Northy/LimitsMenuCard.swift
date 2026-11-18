@@ -6,6 +6,7 @@ import SwiftUI
 struct LimitsMenuCard: View {
     var store: LimitsStore
     var glm: LimitsStore
+    var gemini: LimitsStore
     var tokens: TokenStatsStore
     @Bindable var settings: AppSettings
     var zaiKeys: ZaiKeyStore
@@ -13,7 +14,7 @@ struct LimitsMenuCard: View {
     @State private var isHovering = false
 
     var body: some View {
-        let providers = LimitsProvider.available(blocks: settings.limitsBlocks, hasGLMKey: zaiKeys.hasKey)
+        let providers = LimitsProvider.available(enabled: settings.enabledProviders, hasGLMKey: zaiKeys.hasKey, hasGeminiLogin: GeminiWeb.hasLogin)
         let selected = LimitsProvider.resolve(settings.menuProvider, available: providers)
         return TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 12) {
@@ -27,7 +28,7 @@ struct LimitsMenuCard: View {
                     Divider()
                     if let snapshot = store.snapshot {
                         ForEach(snapshot.windows, id: \.kind) { window in
-                            row(window, now: context.date)
+                            row(window, now: context.date, source: store)
                         }
                     } else if store.isLoading {
                         ProgressView()
@@ -37,11 +38,15 @@ struct LimitsMenuCard: View {
                     tokenSection(now: context.date)
                     errorLabel(store.errorMessage)
                 case .glm:
-                    header("GLM · Z.AI", store: glm, hasSubmenu: false, now: context.date)
+                    header(LimitsProvider.glm.fullTitle, store: glm, hasSubmenu: false, now: context.date)
                     Divider()
-                    glmSection(now: context.date)
+                    quotaSection(glm, now: context.date) { [ZaiPeak(now: context.date).detail(usesCredits: $0.usesCredits, now: context.date)] }
+                case .gemini:
+                    header(LimitsProvider.gemini.fullTitle, store: gemini, hasSubmenu: false, now: context.date)
+                    Divider()
+                    quotaSection(gemini, now: context.date)
                 case nil:
-                    Text("Лимиты скрыты — верните блоки во вкладке «Лимиты»")
+                    Text("Источники лимитов выключены — включите их в настройках")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
@@ -65,7 +70,7 @@ struct LimitsMenuCard: View {
         HStack(spacing: 6) {
             ForEach(providers, id: \.self) { provider in
                 let isOn = provider == selected
-                let remaining = (provider == .claude ? store : glm).snapshot?.headline?.remaining
+                let remaining = self.store(for: provider).snapshot?.headline?.remaining
                 VStack(spacing: 5) {
                     Text(provider.title)
                         .font(.system(size: 12, weight: .semibold))
@@ -103,20 +108,29 @@ struct LimitsMenuCard: View {
         }
     }
 
-    /// Лимиты GLM Coding Plan: окна, пиковое время и детали квоты.
+    private func store(for provider: LimitsProvider) -> LimitsStore {
+        switch provider {
+        case .claude: store
+        case .glm: glm
+        case .gemini: gemini
+        }
+    }
+
+    /// Лимиты GLM и Gemini: окна и детали квоты; leading — строки перед деталями (пиковое время GLM).
     @ViewBuilder
-    private func glmSection(now: Date) -> some View {
-        if let snapshot = glm.snapshot {
+    private func quotaSection(_ source: LimitsStore, now: Date, leading: (UsageSnapshot) -> [UsageDetail] = { _ in [] }) -> some View {
+        if let snapshot = source.snapshot {
             ForEach(snapshot.windows, id: \.kind) { window in
-                row(window, now: now, forecast: false)
+                row(window, now: now, source: source)
             }
-            UsageDetailRows(details: [ZaiPeak(now: now).detail(usesCredits: snapshot.usesCredits, now: now)] + snapshot.details)
-        } else if glm.isLoading {
+            let details = leading(snapshot) + snapshot.details
+            if !details.isEmpty { UsageDetailRows(details: details) }
+        } else if source.isLoading {
             ProgressView()
                 .controlSize(.small)
                 .frame(maxWidth: .infinity)
         }
-        errorLabel(glm.errorMessage)
+        errorLabel(source.errorMessage)
     }
 
     /// Стоимость и токены по локальным логам Claude Code — как у CodexBar.
@@ -197,8 +211,8 @@ struct LimitsMenuCard: View {
         }
     }
 
-    /// forecast — оценка «сколько сеансов осталось» по истории замеров Claude.
-    private func row(_ window: UsageWindow, now: Date, forecast showsForecast: Bool = true) -> some View {
+    /// Под недельным окном — оценка «сколько сеансов осталось» по истории замеров источника.
+    private func row(_ window: UsageWindow, now: Date, source: LimitsStore) -> some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("\(Self.menuTitle(window)) \(window.remaining)% осталось")
                 .font(.system(size: 12, weight: .semibold))
@@ -224,8 +238,8 @@ struct LimitsMenuCard: View {
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
             }
-            if showsForecast, window.kind == .weekly, let snapshot = store.snapshot,
-               let forecast = store.history?.forecast(for: snapshot, now: now) {
+            if window.kind == .weekly, let snapshot = source.snapshot,
+               let forecast = source.history?.forecast(for: snapshot, now: now) {
                 Text(Self.forecastText(forecast))
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
@@ -262,13 +276,15 @@ struct LimitsMenuCard: View {
 /// обновления вместо «⌘R» — индикатор.
 struct RefreshMenuRow: View {
     var limits: LimitsStore
+    var glm: LimitsStore
+    var gemini: LimitsStore
     var tokens: TokenStatsStore
     let action: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
-        let isBusy = limits.isLoading || tokens.isScanning
+        let isBusy = limits.isLoading || glm.isLoading || gemini.isLoading || tokens.isScanning
         HStack(spacing: 6) {
             Text("Обновить")
             Spacer()

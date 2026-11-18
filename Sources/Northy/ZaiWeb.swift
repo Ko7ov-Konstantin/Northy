@@ -407,16 +407,16 @@ final class ZaiKeyStore {
     }
 }
 
+/// Переадресацию не выполняем: ключ или токен не должен уйти на другой адрес.
+final class NoRedirects: NSObject, URLSessionTaskDelegate {
+    nonisolated func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest
+    ) async -> URLRequest? { nil }
+}
+
 /// Источник для LimitsStore: один запрос к Z.AI с ключом пользователя.
 final class ZaiLimitsSource: LimitsSource {
-    /// Переадресацию не выполняем: ключ не должен уйти на другой адрес.
-    private final class NoRedirects: NSObject, URLSessionTaskDelegate {
-        nonisolated func urlSession(
-            _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-            newRequest request: URLRequest
-        ) async -> URLRequest? { nil }
-    }
-
     private let keys: ZaiKeyStore
     private let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral

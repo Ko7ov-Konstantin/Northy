@@ -30,8 +30,8 @@ final class UsageHistory {
     private(set) var samples: [Sample]
     @ObservationIgnored private let store: JSONStore
 
-    init(directory: URL = AppData.directory) {
-        store = JSONStore(url: directory.appendingPathComponent("claude-usage-history.json"))
+    init(directory: URL = AppData.directory, fileName: String = LimitsProvider.claude.historyFileName) {
+        store = JSONStore(url: directory.appendingPathComponent(fileName))
         samples = store.read([Sample].self) ?? []
     }
 

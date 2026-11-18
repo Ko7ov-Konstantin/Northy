@@ -6,6 +6,10 @@ nonisolated enum StatusPage {
 
     static let pageURL = URL(string: "https://status.claude.com")!
     static let componentsURL = URL(string: "https://status.claude.com/api/v2/components.json")!
+    /// Статус Gemini — лента инцидентов Google Workspace по идентификатору продукта, как у CodexBar.
+    static let geminiProductID = "npdyhgECDJ6tB66MxXyo"
+    static let geminiPageURL = URL(string: "https://www.google.com/appsstatus/dashboard/products/\(geminiProductID)/history")!
+    static let googleIncidentsURL = URL(string: "https://www.google.com/appsstatus/dashboard/incidents.json")!
 
     enum Status: String, Sendable {
         case operational
@@ -77,11 +81,62 @@ nonisolated enum StatusPage {
         return "Обновлено \(age)"
     }
 
-    static func fetch() async throws -> [Component] {
-        var request = URLRequest(url: componentsURL)
+    private struct Incident: Decodable {
+        struct Product: Decodable {
+            let id: String
+        }
+        struct Update: Decodable {
+            let status: String?
+        }
+        let end: String?
+        let status_impact: String?
+        let severity: String?
+        let affected_products: [Product]?
+        let currently_affected_products: [Product]?
+        let most_recent_update: Update?
+
+        var status: Status {
+            switch (most_recent_update?.status ?? status_impact)?.uppercased() {
+            case "AVAILABLE": return .operational
+            case "SERVICE_INFORMATION": return .degradedPerformance
+            case "SERVICE_DISRUPTION": return .partialOutage
+            case "SERVICE_OUTAGE": return .majorOutage
+            case "SERVICE_MAINTENANCE", "SCHEDULED_MAINTENANCE": return .underMaintenance
+            default: break
+            }
+            switch severity?.lowercased() {
+            case "medium": return .partialOutage
+            case "high": return .majorOutage
+            default: return .degradedPerformance
+            }
+        }
+    }
+
+    /// Чем тяжелее сбой, тем больше число: из открытых инцидентов берётся самый тяжёлый.
+    private static let severityOrder: [Status] = [.operational, .unknown, .underMaintenance, .degradedPerformance, .partialOutage, .majorOutage]
+
+    /// Одна строка «Gemini»: открытых инцидентов продукта нет — работает.
+    static func parseGoogleIncidents(_ data: Data) throws -> [Component] {
+        let incidents = try JSONDecoder().decode([Incident].self, from: data)
+        let open = incidents.filter { incident in
+            incident.end == nil && (incident.currently_affected_products ?? incident.affected_products ?? []).contains { $0.id == geminiProductID }
+        }
+        let worst = open.map(\.status).max { (severityOrder.firstIndex(of: $0) ?? 0) < (severityOrder.firstIndex(of: $1) ?? 0) }
+        return [Component(name: "Gemini", status: worst ?? .operational)]
+    }
+
+    /// Статусы источника; у источника без публичной страницы список пуст.
+    static func fetch(for provider: LimitsProvider) async throws -> [Component] {
+        let url: URL
+        switch provider {
+        case .claude: url = componentsURL
+        case .gemini: url = googleIncidentsURL
+        case .glm: return []
+        }
+        var request = URLRequest(url: url)
         request.timeoutInterval = 10
         request.httpShouldHandleCookies = false
         let (data, _) = try await URLSession(configuration: .ephemeral).data(for: request)
-        return try parse(data)
+        return provider == .claude ? try parse(data) : try parseGoogleIncidents(data)
     }
 }

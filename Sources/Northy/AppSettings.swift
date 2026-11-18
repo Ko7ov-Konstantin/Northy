@@ -45,6 +45,11 @@ final class AppSettings {
         didSet { defaults.set(limitsBlocks.map(\.rawValue), forKey: Keys.limitsBlocks) }
     }
 
+    /// Включённые источники лимитов: выключенный не запрашивается и пропадает из меню, строки меню и колец.
+    var enabledProviders: Set<LimitsProvider> {
+        didSet { defaults.set(LimitsProvider.allCases.filter(enabledProviders.contains).map(\.rawValue), forKey: Keys.providers) }
+    }
+
     /// Вкладка меню статус-бара: чьи лимиты показывать.
     var menuProvider: LimitsProvider {
         didSet { defaults.set(menuProvider.rawValue, forKey: Keys.menuProvider) }
@@ -84,6 +89,8 @@ final class AppSettings {
         static let pinLimit = "clipboard.pinLimit"
         static let limitsBlocks = "limits.blocks"
         static let menuProvider = "limits.menuProvider"
+        static let geminiBlocksOffered = "limits.geminiBlocksOffered"
+        static let providers = "limits.providers"
         static let recordingSystemSound = "recording.systemSound"
         static let recordingMicrophone = "recording.microphone"
         static let scriptPath = "tools.scriptPath"
@@ -113,7 +120,31 @@ final class AppSettings {
             enabledTabs = [.clipboard]
         }
         defaults.set(true, forKey: Keys.toolsTabOffered)
-        limitsBlocks = defaults.stringArray(forKey: Keys.limitsBlocks).map(LimitsBlock.sanitized) ?? LimitsBlock.allCases
+        let savedBlocks = defaults.stringArray(forKey: Keys.limitsBlocks).map(LimitsBlock.sanitized)
+        if let stored = defaults.stringArray(forKey: Keys.providers) {
+            enabledProviders = Set(stored.compactMap(LimitsProvider.init(rawValue:)))
+        } else {
+            // Раньше Claude и GLM выключали, убирая их блок лимитов, — этот выбор переносится один раз.
+            let wasHidden = { (provider: LimitsProvider) in savedBlocks.map { !$0.contains(LimitsBlock.limits(of: provider)) } ?? false }
+            let providers = LimitsProvider.allCases.filter { $0 == .gemini || !wasHidden($0) }
+            enabledProviders = Set(providers)
+            defaults.set(providers.map(\.rawValue), forKey: Keys.providers)
+        }
+        if var blocks = savedBlocks {
+            // Блоки Gemini и история плана GLM появились позже: в настроенный список
+            // добавляются один раз; уберёт пользователь — не вернутся.
+            if !defaults.bool(forKey: Keys.geminiBlocksOffered) {
+                blocks = LimitsBlock.placing(.geminiLimits, at: LimitsBlock.limitsIndex(for: .geminiLimits, in: blocks), in: blocks)
+                for block in [LimitsBlock.glmPlanHistory, .geminiDetails, .geminiPlanHistory] where !blocks.contains(block) {
+                    blocks.append(block)
+                }
+                defaults.set(blocks.map(\.rawValue), forKey: Keys.limitsBlocks)
+            }
+            limitsBlocks = blocks
+        } else {
+            limitsBlocks = LimitsBlock.allCases
+        }
+        defaults.set(true, forKey: Keys.geminiBlocksOffered)
         menuProvider = defaults.string(forKey: Keys.menuProvider).flatMap(LimitsProvider.init(rawValue:)) ?? .claude
         recordingAudio = RecordingAudio(
             systemSound: defaults.object(forKey: Keys.recordingSystemSound) as? Bool ?? true,

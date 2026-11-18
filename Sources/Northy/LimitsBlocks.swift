@@ -1,23 +1,69 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 
-/// Источник лимитов: подписка Claude или GLM Coding Plan (Z.AI).
+/// Источник лимитов: подписка Claude, GLM Coding Plan (Z.AI) или Gemini по входу Google из Antigravity.
 nonisolated enum LimitsProvider: String, CaseIterable, Sendable {
-    case claude, glm
+    case claude, glm, gemini
 
     var title: String {
         switch self {
         case .claude: "Claude"
         case .glm: "GLM"
+        case .gemini: "Gemini"
         }
     }
 
-    /// Какие источники сейчас показываются: Claude — пока его блок не скрыт, GLM — когда задан ключ и блок не скрыт.
-    static func available(blocks: [LimitsBlock], hasGLMKey: Bool) -> [LimitsProvider] {
-        var result: [LimitsProvider] = []
-        if blocks.contains(.claudeLimits) { result.append(.claude) }
-        if hasGLMKey, blocks.contains(.glmLimits) { result.append(.glm) }
-        return result
+    /// Заголовок карточки в меню и раздела во вкладке «Лимиты».
+    var fullTitle: String {
+        switch self {
+        case .claude: "Claude"
+        case .glm: "GLM · Z.AI"
+        case .gemini: "Gemini · Antigravity"
+        }
+    }
+
+    /// Пункт меню «Дашборд использования»; nil — пункта у источника нет.
+    var dashboardURL: URL? {
+        switch self {
+        case .claude: URL(string: "https://claude.ai/settings/usage")
+        case .glm: ZaiWeb.dashboardURL
+        case .gemini: nil
+        }
+    }
+
+    /// Пункт меню «Страница статуса»; nil — публичной страницы у источника нет.
+    var statusPageURL: URL? {
+        switch self {
+        case .claude: StatusPage.pageURL
+        case .glm: nil
+        case .gemini: StatusPage.geminiPageURL
+        }
+    }
+
+    /// Цвет значков блоков источника в режиме правки вкладки «Лимиты».
+    @MainActor var tint: Color {
+        switch self {
+        case .claude: Theme.sky
+        case .glm: Theme.mint
+        case .gemini: Theme.violet
+        }
+    }
+
+    /// Файл истории замеров для графика «Использование плана».
+    var historyFileName: String { "\(rawValue)-usage-history.json" }
+
+    /// Какие источники сейчас показываются: включённые в настройках; GLM нужен ещё ключ,
+    /// Gemini — вход Google из Antigravity. Блоки вкладки «Лимиты» на это не влияют.
+    static func available(enabled: Set<LimitsProvider>, hasGLMKey: Bool, hasGeminiLogin: Bool) -> [LimitsProvider] {
+        allCases.filter { provider in
+            guard enabled.contains(provider) else { return false }
+            switch provider {
+            case .claude: return true
+            case .glm: return hasGLMKey
+            case .gemini: return hasGeminiLogin
+            }
+        }
     }
 
     /// Выбранная вкладка меню; если её источник скрыт — первый доступный.
@@ -28,9 +74,10 @@ nonisolated enum LimitsProvider: String, CaseIterable, Sendable {
 
 /// Блок вкладки «Лимиты». Пользователь сам решает, какие блоки видны и в каком порядке.
 nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
-    case claudeLimits, glmLimits
+    case claudeLimits, glmLimits, geminiLimits
     case claudeCost, claudeSessions, claudeDailyCost, claudePlanHistory
-    case glmDetails, glmHourly, glmDaily
+    case glmDetails, glmHourly, glmDaily, glmPlanHistory
+    case geminiDetails, geminiPlanHistory
 
     var id: String { rawValue }
 
@@ -38,6 +85,7 @@ nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .claudeLimits: "Лимиты Claude"
         case .glmLimits: "Лимиты GLM"
+        case .geminiLimits: "Лимиты Gemini"
         case .claudeCost: "Стоимость Claude Code"
         case .claudeSessions: "Сессии Claude Code"
         case .claudeDailyCost: "Стоимость по дням"
@@ -45,17 +93,20 @@ nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
         case .glmDetails: "Детали квоты GLM"
         case .glmHourly: "Токены GLM по часам"
         case .glmDaily: "Токены GLM по дням"
+        case .glmPlanHistory: "Использование плана GLM"
+        case .geminiDetails: "Детали квоты Gemini"
+        case .geminiPlanHistory: "Использование плана Gemini"
         }
     }
 
     var icon: String {
         switch self {
-        case .claudeLimits, .glmLimits: "gauge.with.dots.needle.50percent"
+        case .claudeLimits, .glmLimits, .geminiLimits: "gauge.with.dots.needle.50percent"
         case .claudeCost: "dollarsign.circle"
         case .claudeSessions: "terminal"
         case .claudeDailyCost: "chart.bar"
-        case .claudePlanHistory: "chart.bar.xaxis"
-        case .glmDetails: "list.bullet.rectangle"
+        case .claudePlanHistory, .glmPlanHistory, .geminiPlanHistory: "chart.bar.xaxis"
+        case .glmDetails, .geminiDetails: "list.bullet.rectangle"
         case .glmHourly, .glmDaily: "chart.bar"
         }
     }
@@ -63,14 +114,15 @@ nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
     var provider: LimitsProvider {
         switch self {
         case .claudeLimits, .claudeCost, .claudeSessions, .claudeDailyCost, .claudePlanHistory: .claude
-        case .glmLimits, .glmDetails, .glmHourly, .glmDaily: .glm
+        case .glmLimits, .glmDetails, .glmHourly, .glmDaily, .glmPlanHistory: .glm
+        case .geminiLimits, .geminiDetails, .geminiPlanHistory: .gemini
         }
     }
 
     /// Небольшие графики встают по два в ряд.
     var isHalfWidth: Bool {
         switch self {
-        case .claudeDailyCost, .claudePlanHistory, .glmHourly, .glmDaily: true
+        case .claudeDailyCost, .claudePlanHistory, .glmHourly, .glmDaily, .glmPlanHistory, .geminiPlanHistory: true
         default: false
         }
     }
@@ -84,6 +136,22 @@ nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
     static func sanitized(_ raw: [String]) -> [LimitsBlock] {
         var seen = Set<LimitsBlock>()
         return raw.compactMap(LimitsBlock.init(rawValue:)).filter { seen.insert($0).inserted }
+    }
+
+    /// Блок лимитов источника, который включают в настройках.
+    static func limits(of provider: LimitsProvider) -> LimitsBlock {
+        switch provider {
+        case .claude: .claudeLimits
+        case .glm: .glmLimits
+        case .gemini: .geminiLimits
+        }
+    }
+
+    /// Куда встаёт возвращённый блок лимитов: в начало, в порядке Claude, GLM, Gemini.
+    static func limitsIndex(for block: LimitsBlock, in blocks: [LimitsBlock]) -> Int {
+        let order = LimitsProvider.allCases.map(limits(of:))
+        let earlier = order.prefix { $0 != block }
+        return blocks.prefix { earlier.contains($0) }.count
     }
 
     /// Строки вкладки: два соседних небольших блока делят строку пополам.

@@ -42,6 +42,7 @@ struct SettingsView: View {
     @Bindable var settings: AppSettings
     var zaiKeys: ZaiKeyStore
     var glm: LimitsStore
+    var gemini: LimitsStore
     var tokenStore: TokenStatsStore
     let onZaiKeyChanged: () -> Void
     let onClearClipboard: () -> Void
@@ -134,9 +135,10 @@ struct SettingsView: View {
 
         case .limits:
             Section("Что показывать") {
-                Toggle("Лимиты Claude", isOn: limitsBlockBinding(.claudeLimits))
-                Toggle("Лимиты GLM", isOn: limitsBlockBinding(.glmLimits))
-                Text("Скрытый источник не запрашивается и пропадает из вкладки «Лимиты», меню и строки меню: без лимитов Claude Northy не обращается к claude.ai, а цифры в строке меню берутся из GLM. Остальные блоки вкладки настраиваются в ней самой — кнопкой «Настроить блоки» внизу.")
+                Toggle("Лимиты Claude", isOn: providerBinding(.claude))
+                Toggle("Лимиты GLM", isOn: providerBinding(.glm))
+                Toggle("Лимиты Gemini", isOn: providerBinding(.gemini))
+                Text("Источники независимы: можно включить один, два или все три. Выключенный источник не запрашивается и пропадает из меню, строки меню и колец в шапке: без лимитов Claude Northy не обращается к claude.ai. Цифры в строке меню берутся из первого включённого: Claude, затем GLM, затем Gemini. Какие карточки видны во вкладке «Лимиты», настраивается в ней самой кнопкой «Настроить блоки» и на включённость источника не влияет.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -173,6 +175,24 @@ struct SettingsView: View {
                         .font(.callout)
                 }
                 Text("Ключ тарифа GLM Coding Plan: лимиты запрашиваются вместе с лимитами Claude и видны во вкладке «Лимиты» и в меню. Ключ хранится в Связке ключей и уходит только на api.z.ai; после переустановки Northy macOS один раз спросит разрешение на доступ к нему.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Section("Лимиты Gemini (Antigravity)") {
+                if gemini.isLoading {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text("Запрашиваю лимиты Gemini…")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    let status = geminiStatus
+                    Label(status.text, systemImage: status.ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                        .foregroundStyle(status.ok ? .green : .orange)
+                        .font(.callout)
+                }
+                Text("Northy запрашивает квоту через установленный Antigravity CLI (agy -p \"/usage\") — токены остаются в самом Antigravity и не читаются напрямую. Если CLI не найден, используется прежний файл входа в ~/.gemini.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -299,17 +319,21 @@ extension SettingsView {
         return (snapshot.plan.map { "Ключ принят · тариф \($0)" } ?? "Ключ принят", true)
     }
 
-    fileprivate func limitsBlockBinding(_ block: LimitsBlock) -> Binding<Bool> {
+    /// Найден ли Antigravity CLI / вход Google и что ответил запрос квоты.
+    fileprivate var geminiStatus: (text: String, ok: Bool) {
+        guard GeminiWeb.hasLogin else { return ("Antigravity CLI (agy) не найден — установите и войдите в Antigravity", false) }
+        if let error = gemini.errorMessage { return (error, false) }
+        guard let snapshot = gemini.snapshot else {
+            return (GeminiWeb.hasCLI ? "Antigravity CLI (agy) найден" : "Вход Google из Antigravity найден", true)
+        }
+        return (snapshot.plan.map { "Квота получена · тариф \($0)" } ?? "Квота получена", true)
+    }
+
+    fileprivate func providerBinding(_ provider: LimitsProvider) -> Binding<Bool> {
         Binding(
-            get: { settings.limitsBlocks.contains(block) },
+            get: { settings.enabledProviders.contains(provider) },
             set: { isOn in
-                if isOn {
-                    // Лимиты встают в начало, как по умолчанию: Claude первым, GLM следом.
-                    let index = block == .claudeLimits ? 0 : (settings.limitsBlocks.first == .claudeLimits ? 1 : 0)
-                    settings.limitsBlocks = LimitsBlock.placing(block, at: index, in: settings.limitsBlocks)
-                } else {
-                    settings.limitsBlocks.removeAll { $0 == block }
-                }
+                if isOn { settings.enabledProviders.insert(provider) } else { settings.enabledProviders.remove(provider) }
             }
         )
     }

@@ -117,20 +117,38 @@ final class PanelController: NSObject {
     let shelfStore = ShelfStore()
     let limitsStore = LimitsStore(source: ClaudeWebLimitsSource(), history: UsageHistory())
     let zaiKeys = ZaiKeyStore()
-    private(set) lazy var glmStore = LimitsStore(source: ZaiLimitsSource(keys: zaiKeys))
-    /// Пункты меню выбранной вкладки: свои у Claude и у GLM.
+    private(set) lazy var glmStore = LimitsStore(
+        source: ZaiLimitsSource(keys: zaiKeys), history: UsageHistory(fileName: LimitsProvider.glm.historyFileName)
+    )
+    let geminiStore = LimitsStore(source: GeminiLimitsSource(), history: UsageHistory(fileName: LimitsProvider.gemini.historyFileName))
+    /// Пункты меню, которые есть только у одного источника; общие пункты подстраиваются под выбранную вкладку.
     private var glmMenuItems: [NSMenuItem] = []
     private var claudeMenuItems: [NSMenuItem] = []
+    private var dashboardMenuItem: NSMenuItem?
+    private var statusPageMenuItem: NSMenuItem?
     private var limitsCardItem: NSMenuItem?
     private var claudeCardSubmenu: NSMenu?
     private var claudeWasShown = true
 
     private var limitsProviders: [LimitsProvider] {
-        LimitsProvider.available(blocks: settings.limitsBlocks, hasGLMKey: zaiKeys.hasKey)
+        LimitsProvider.available(enabled: settings.enabledProviders, hasGLMKey: zaiKeys.hasKey, hasGeminiLogin: GeminiWeb.hasLogin)
     }
-    /// Скрытый блок «Лимиты Claude» — Northy не ходит на claude.ai.
-    private var claudeShown: Bool { settings.limitsBlocks.contains(.claudeLimits) }
-    private var glmWanted: Bool { zaiKeys.hasKey && settings.limitsBlocks.contains { $0.provider == .glm } }
+    /// Вкладка меню: выбранный источник, а если он скрыт — первый показываемый.
+    private var menuProvider: LimitsProvider? {
+        limitsEnabled ? LimitsProvider.resolve(settings.menuProvider, available: limitsProviders) : nil
+    }
+    private func store(for provider: LimitsProvider) -> LimitsStore {
+        switch provider {
+        case .claude: limitsStore
+        case .glm: glmStore
+        case .gemini: geminiStore
+        }
+    }
+    /// Выключенный в настройках Claude — Northy не ходит на claude.ai.
+    private var claudeShown: Bool { limitsProviders.contains(.claude) }
+    private var glmWanted: Bool { limitsProviders.contains(.glm) }
+    /// Без входа Google из Antigravity Northy к серверам Google не обращается.
+    private var geminiWanted: Bool { limitsProviders.contains(.gemini) }
     private var tokenLogsWanted: Bool { claudeShown || settings.limitsBlocks.contains(where: \.needsTokenLogs) }
     let tokenStore = TokenStatsStore()
     let settings = AppSettings()
@@ -144,6 +162,7 @@ final class PanelController: NSObject {
             settings: settings,
             zaiKeys: zaiKeys,
             glm: glmStore,
+            gemini: geminiStore,
             tokenStore: tokenStore,
             onZaiKeyChanged: { [weak self] in self?.zaiKeyChanged() }
         ) { [weak self] in self?.clipboardStore.clear() }
@@ -170,7 +189,7 @@ final class PanelController: NSObject {
         chatWindow.store?.stopForTermination()
         clipboardStore.flush()
         shelfStore.flush()
-        limitsStore.history?.flush()
+        LimitsProvider.allCases.forEach { store(for: $0).history?.flush() }
         // Без Northy пункты Finder не нужны: без файла состояния расширение их не покажет.
         try? FileManager.default.removeItem(at: finderStateURL)
     }
@@ -213,6 +232,7 @@ final class PanelController: NSObject {
             shelfStore: shelfStore,
             limitsStore: limitsStore,
             glmStore: glmStore,
+            geminiStore: geminiStore,
             tokenStore: tokenStore,
             settings: settings,
             zaiKeys: zaiKeys,
@@ -308,7 +328,7 @@ final class PanelController: NSObject {
         menu.delegate = self
 
         // Карточка лимитов, как у CodexBar: SwiftUI-вью прямо в меню, следит за LimitsStore сама.
-        let card = NSHostingView(rootView: LimitsMenuCard(store: limitsStore, glm: glmStore, tokens: tokenStore, settings: settings, zaiKeys: zaiKeys))
+        let card = NSHostingView(rootView: LimitsMenuCard(store: limitsStore, glm: glmStore, gemini: geminiStore, tokens: tokenStore, settings: settings, zaiKeys: zaiKeys))
         card.sizingOptions = [.intrinsicContentSize]
         card.frame.size = card.fittingSize
         limitsCard = card
@@ -325,10 +345,9 @@ final class PanelController: NSObject {
         menu.addItem(cardItem)
         menu.addItem(.separator())
 
-        // Подменю с графиками, как у CodexBar: история плана и стоимость по дням.
-        let history = limitsStore.history
-        menu.addItem(chartSubmenuItem(title: "Использование плана", symbol: "chart.bar.xaxis") {
-            PlanHistoryChart(samples: history?.samples ?? [])
+        // Подменю с графиками, как у CodexBar: история плана выбранного источника и стоимость по дням.
+        menu.addItem(chartSubmenuItem(title: "Использование плана", symbol: "chart.bar.xaxis") { [weak self] in
+            PlanHistoryChart(samples: self?.menuProvider.flatMap { self?.store(for: $0).history?.samples } ?? [])
         })
         let tokens = tokenStore
         menu.addItem(chartSubmenuItem(title: "Стоимость", symbol: "dollarsign.circle") {
@@ -353,7 +372,7 @@ final class PanelController: NSObject {
         // обновляются прямо в открытой карточке. ⌘R работает как обычно.
         let refreshItem = NSMenuItem(title: "Обновить", action: #selector(refreshFromStatusMenu), keyEquivalent: "r")
         refreshItem.target = self
-        let refreshRow = NSHostingView(rootView: RefreshMenuRow(limits: limitsStore, tokens: tokenStore) { [weak self] in
+        let refreshRow = NSHostingView(rootView: RefreshMenuRow(limits: limitsStore, glm: glmStore, gemini: geminiStore, tokens: tokenStore) { [weak self] in
             self?.refreshEverything(force: true)
         })
         refreshRow.frame.size = refreshRow.fittingSize
@@ -362,21 +381,16 @@ final class PanelController: NSObject {
         menu.addItem(.separator())
         let dashboardItem = NSMenuItem(title: "Дашборд использования", action: #selector(openLinkFromStatusMenu(_:)), keyEquivalent: "")
         dashboardItem.target = self
-        dashboardItem.representedObject = URL(string: "https://claude.ai/settings/usage")
         dashboardItem.image = NSImage(systemSymbolName: "chart.xyaxis.line", accessibilityDescription: nil)
         menu.addItem(dashboardItem)
-        let glmItem = NSMenuItem(title: "Дашборд GLM", action: #selector(openLinkFromStatusMenu(_:)), keyEquivalent: "")
-        glmItem.target = self
-        glmItem.representedObject = ZaiWeb.dashboardURL
-        glmItem.image = NSImage(systemSymbolName: "chart.xyaxis.line", accessibilityDescription: nil)
-        menu.addItem(glmItem)
-        glmMenuItems.append(glmItem)
+        dashboardMenuItem = dashboardItem
 
-        // Подменю со статусом сервисов Claude — как у CodexBar; заполняется при открытии меню.
+        // Подменю со статусом сервисов выбранного источника — как у CodexBar; заполняется при открытии меню.
         let statusPageItem = NSMenuItem(title: "Страница статуса", action: nil, keyEquivalent: "")
         statusPageItem.image = NSImage(systemSymbolName: "waveform.path.ecg", accessibilityDescription: nil)
         statusPageItem.submenu = statusSubmenu
         menu.addItem(statusPageItem)
+        statusPageMenuItem = statusPageItem
         statusSubmenu.delegate = self
         fillStatusSubmenu()
         menu.addItem(.separator())
@@ -394,7 +408,7 @@ final class PanelController: NSObject {
         let separatorBeforeSettings = menu.items[menu.index(of: settingsItem) - 1]
         let general: Set<NSMenuItem> = [showItem, separatorBeforeSettings, settingsItem, quitItem]
         limitsMenuItems = menu.items.filter { !general.contains($0) }
-        let claudeTitles: Set = ["Использование плана", "Стоимость", "Сессии Claude Code", "Дашборд использования", "Страница статуса"]
+        let claudeTitles: Set = ["Стоимость", "Сессии Claude Code"]
         claudeMenuItems = menu.items.filter { claudeTitles.contains($0.title) }
 
         statusItem = item
@@ -406,14 +420,21 @@ final class PanelController: NSObject {
         withObservationTracking {
             updateStatusButton(lines: StatusBarButton.lines(activity: toolsStore.activity, limits: limitsEnabled ? statusBarLines() : []))
             // Вкладка меню, как у CodexBar: пункты и подменю — только выбранного источника.
-            let provider = limitsEnabled ? LimitsProvider.resolve(settings.menuProvider, available: limitsProviders) : nil
+            let provider = menuProvider
             limitsMenuItems.forEach { $0.isHidden = provider == nil }
             claudeMenuItems.forEach { $0.isHidden = provider != .claude }
             glmMenuItems.forEach { $0.isHidden = provider != .glm }
+            // Дашборд и страница статуса — только у источника, у которого они есть.
+            dashboardMenuItem?.representedObject = provider?.dashboardURL
+            dashboardMenuItem?.isHidden = provider?.dashboardURL == nil
+            statusPageMenuItem?.isHidden = provider?.statusPageURL == nil
+            if provider != statusSubmenuProvider { fillStatusSubmenu() }
             limitsCardItem?.submenu = provider == .claude ? claudeCardSubmenu : nil
-            _ = glmStore.snapshot
-            _ = glmStore.errorMessage
-            _ = glmStore.isLoading
+            for store in [glmStore, geminiStore] {
+                _ = store.snapshot
+                _ = store.errorMessage
+                _ = store.isLoading
+            }
             // Высота карточки меняется вместе с данными (строки лимитов, ошибка, загрузка).
             _ = limitsStore.errorMessage
             _ = limitsStore.isLoading
@@ -439,12 +460,11 @@ final class PanelController: NSObject {
 
     /// Строки остатка для строки меню. До первого обновления после запуска —
     /// последние известные: при включённых лимитах в строке меню только цифры.
-    /// Источник — первый показываемый: Claude, а если его лимиты скрыты — GLM.
+    /// Источник — первый показываемый: Claude, а если его лимиты скрыты — GLM, затем Gemini.
     private func statusBarLines() -> [String] {
         guard let provider = limitsProviders.first else { return [] }
-        let key = provider == .claude ? "statusBar.lastLines" : "statusBar.lastLines.glm"
-        let store = provider == .claude ? limitsStore : glmStore
-        if let lines = store.snapshot?.statusBarLines, !lines.isEmpty {
+        let key = provider == .claude ? "statusBar.lastLines" : "statusBar.lastLines.\(provider.rawValue)"
+        if let lines = store(for: provider).snapshot?.statusBarLines, !lines.isEmpty {
             UserDefaults.standard.set(lines, forKey: key)
             return lines
         }
@@ -518,27 +538,37 @@ final class PanelController: NSObject {
         return submenu
     }
 
-    /// Последние полученные статусы и их свежесть — при ошибке список не пропадает.
-    private var statusComponents: [StatusPage.Component]?
-    private var statusUpdatedAt: Date?
-    private var statusLoading = false
-    private var statusFailed = false
+    /// Последние полученные статусы источника и их свежесть — при ошибке список не пропадает.
+    private struct ServiceStatus {
+        var components: [StatusPage.Component]?
+        var updatedAt: Date?
+        var isLoading = false
+        var failed = false
+    }
 
+    private var serviceStatuses: [LimitsProvider: ServiceStatus] = [:]
+    /// Чей статус сейчас в подменю: при смене вкладки меню оно собирается заново.
+    private var statusSubmenuProvider: LimitsProvider?
+
+    /// Подменю показывает статус источника выбранной вкладки меню.
     private func fillStatusSubmenu() {
         statusSubmenu.removeAllItems()
+        statusSubmenuProvider = menuProvider
+        guard let provider = menuProvider, let pageURL = provider.statusPageURL else { return }
+        let status = serviceStatuses[provider] ?? ServiceStatus()
         let freshness = NSMenuItem(
-            title: StatusPage.freshness(updatedAt: statusUpdatedAt, isLoading: statusLoading, failed: statusFailed),
+            title: StatusPage.freshness(updatedAt: status.updatedAt, isLoading: status.isLoading, failed: status.failed),
             action: nil,
             keyEquivalent: ""
         )
         freshness.isEnabled = false
         freshness.image = NSImage(
-            systemSymbolName: statusFailed ? "exclamationmark.triangle" : "clock",
+            systemSymbolName: status.failed ? "exclamationmark.triangle" : "clock",
             accessibilityDescription: nil
         )
         statusSubmenu.addItem(freshness)
         statusSubmenu.addItem(.separator())
-        if let components = statusComponents {
+        if let components = status.components {
             // Табуляция с правым выравниванием — статус прижат к правому краю, как у CodexBar.
             let paragraph = NSMutableParagraphStyle()
             paragraph.tabStops = [NSTextTab(textAlignment: .right, location: 320)]
@@ -556,31 +586,31 @@ final class PanelController: NSObject {
                 let item = NSMenuItem(title: component.name, action: #selector(openLinkFromStatusMenu(_:)), keyEquivalent: "")
                 item.attributedTitle = title
                 item.target = self
-                item.representedObject = StatusPage.pageURL
+                item.representedObject = pageURL
                 statusSubmenu.addItem(item)
             }
             statusSubmenu.addItem(.separator())
         }
         let openItem = NSMenuItem(title: "Открыть страницу статуса", action: #selector(openLinkFromStatusMenu(_:)), keyEquivalent: "")
         openItem.target = self
-        openItem.representedObject = StatusPage.pageURL
+        openItem.representedObject = pageURL
         openItem.image = NSImage(systemSymbolName: "arrow.up.forward.square", accessibilityDescription: nil)
         statusSubmenu.addItem(openItem)
     }
 
-    private func refreshStatusPage() {
-        guard !statusLoading else { return }
-        statusLoading = true
+    private func refreshStatusPage(for provider: LimitsProvider) {
+        guard provider.statusPageURL != nil, serviceStatuses[provider]?.isLoading != true else { return }
+        serviceStatuses[provider, default: ServiceStatus()].isLoading = true
         fillStatusSubmenu()
         Task {
             do {
-                statusComponents = try await StatusPage.fetch()
-                statusUpdatedAt = .now
-                statusFailed = false
+                serviceStatuses[provider]?.components = try await StatusPage.fetch(for: provider)
+                serviceStatuses[provider]?.updatedAt = .now
+                serviceStatuses[provider]?.failed = false
             } catch {
-                statusFailed = true
+                serviceStatuses[provider]?.failed = true
             }
-            statusLoading = false
+            serviceStatuses[provider]?.isLoading = false
             fillStatusSubmenu()
         }
     }
@@ -606,24 +636,28 @@ final class PanelController: NSObject {
         guard limitsEnabled else { return }
         if claudeShown {
             Task { await limitsStore.refresh(force: true) }
-            refreshStatusPage()
+            refreshStatusPage(for: .claude)
         }
         refreshGLM(force: true)
+        refreshGemini(force: true)
+        if geminiWanted { refreshStatusPage(for: .gemini) }
         if tokenLogsWanted {
             Task { await tokenStore.refresh(force: force) }
         }
     }
 
-    /// Состав блоков вкладки «Лимиты» изменился: скрытый источник перестаёт
-    /// запрашиваться и забывает цифры, возвращённый — запрашивается заново.
+    /// Источники или блоки вкладки «Лимиты» изменились: выключенный источник перестаёт
+    /// запрашиваться и забывает цифры, включённый — запрашивается заново.
     private func observeLimitsBlocks() {
         withObservationTracking {
+            _ = settings.enabledProviders
             _ = settings.limitsBlocks
         } onChange: { [weak self] in
             DispatchQueue.main.async { self?.observeLimitsBlocks() }
         }
         if !claudeShown, limitsStore.snapshot != nil || limitsStore.errorMessage != nil { limitsStore.reset() }
         if !glmWanted, glmStore.snapshot != nil || glmStore.errorMessage != nil { glmStore.reset() }
+        if !geminiWanted, geminiStore.snapshot != nil || geminiStore.errorMessage != nil { geminiStore.reset() }
         if claudeShown, !claudeWasShown, limitsEnabled { requestDiskAccessIfNeeded() }
         claudeWasShown = claudeShown
         refreshLimits()
@@ -633,6 +667,12 @@ final class PanelController: NSObject {
     private func refreshGLM(force: Bool) {
         guard glmWanted else { return }
         Task { await glmStore.refresh(force: force) }
+    }
+
+    /// Gemini запрашивается параллельно с остальными; без входа Google из Antigravity запросов нет.
+    private func refreshGemini(force: Bool) {
+        guard geminiWanted else { return }
+        Task { await geminiStore.refresh(force: force) }
     }
 
     /// Ключ Z.AI сохранён или удалён в настройках: новый сразу проверяется запросом.
@@ -648,6 +688,7 @@ final class PanelController: NSObject {
             Task { await limitsStore.refresh() }
         }
         refreshGLM(force: false)
+        refreshGemini(force: false)
         if tokenLogsWanted {
             Task { await tokenStore.refresh() }
         }

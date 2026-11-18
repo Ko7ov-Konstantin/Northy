@@ -66,15 +66,100 @@ struct LimitsBlocksTests {
         #expect(LimitsBlock.insertionIndex(frames: [], point: .zero) == 0)
     }
 
-    /// Скрытые лимиты Claude — источник пропадает из меню и строки меню; GLM нужен ещё и ключ.
-    @Test func providersFollowBlocksAndKey() {
-        #expect(LimitsProvider.available(blocks: LimitsBlock.allCases, hasGLMKey: true) == [.claude, .glm])
-        #expect(LimitsProvider.available(blocks: LimitsBlock.allCases, hasGLMKey: false) == [.claude])
-        #expect(LimitsProvider.available(blocks: [.glmLimits, .claudeCost], hasGLMKey: true) == [.glm])
-        #expect(LimitsProvider.available(blocks: [.claudeCost], hasGLMKey: true).isEmpty)
+    /// Источник показывается, когда включён в настройках; GLM нужен ещё ключ, Gemini — вход Google из Antigravity.
+    @Test func providersFollowSettingsKeyAndLogin() {
+        let all = Set(LimitsProvider.allCases)
+        #expect(LimitsProvider.available(enabled: all, hasGLMKey: true, hasGeminiLogin: true) == [.claude, .glm, .gemini])
+        #expect(LimitsProvider.available(enabled: all, hasGLMKey: false, hasGeminiLogin: true) == [.claude, .gemini])
+        #expect(LimitsProvider.available(enabled: all, hasGLMKey: true, hasGeminiLogin: false) == [.claude, .glm])
+        #expect(LimitsProvider.available(enabled: [.gemini], hasGLMKey: true, hasGeminiLogin: true) == [.gemini], "один источник из трёх")
+        #expect(LimitsProvider.available(enabled: [.glm, .gemini], hasGLMKey: false, hasGeminiLogin: false).isEmpty)
+        #expect(LimitsProvider.available(enabled: [], hasGLMKey: true, hasGeminiLogin: true).isEmpty)
 
         #expect(LimitsProvider.resolve(.glm, available: [.claude, .glm]) == .glm)
         #expect(LimitsProvider.resolve(.glm, available: [.claude]) == .claude)
+        #expect(LimitsProvider.resolve(.gemini, available: [.claude, .gemini]) == .gemini)
         #expect(LimitsProvider.resolve(.claude, available: []) == nil)
+        #expect(LimitsBlock.geminiLimits.provider == .gemini)
+        #expect(LimitsBlock.geminiPlanHistory.provider == .gemini)
+        #expect(LimitsBlock.glmPlanHistory.provider == .glm)
+    }
+
+    /// Убранный из вкладки блок не выключает источник: это разные настройки.
+    @Test func removingBlockKeepsProviderEnabled() throws {
+        let (settings, defaults, suite) = try isolatedSettings()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(settings.enabledProviders == Set(LimitsProvider.allCases))
+        settings.limitsBlocks.removeAll { $0 == .geminiLimits || $0 == .claudeLimits }
+        #expect(settings.enabledProviders == Set(LimitsProvider.allCases))
+
+        settings.enabledProviders = [.gemini]
+        let reloaded = AppSettings(defaults: defaults)
+        #expect(reloaded.enabledProviders == [.gemini])
+        #expect(reloaded.limitsBlocks == settings.limitsBlocks, "выключенный источник блоки не трогает")
+    }
+
+    /// Раньше источник выключали, убирая его блок лимитов: этот выбор сохраняется, Gemini включён.
+    @Test func enabledProvidersComeFromOldBlocksOnce() throws {
+        let (_, defaults, suite) = try isolatedSettings()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.removeObject(forKey: "limits.providers")
+        defaults.set(["glmLimits", "claudeCost"], forKey: "limits.blocks")
+        #expect(AppSettings(defaults: defaults).enabledProviders == [.glm, .gemini])
+
+        defaults.set(["claudeLimits"], forKey: "limits.blocks")
+        #expect(AppSettings(defaults: defaults).enabledProviders == [.glm, .gemini], "второй раз из блоков не выводится")
+    }
+
+    /// Пункты меню «Дашборд» и «Страница статуса» есть только у источника, у которого есть адрес.
+    @Test func menuLinksPerProvider() {
+        #expect(LimitsProvider.claude.dashboardURL?.absoluteString == "https://claude.ai/settings/usage")
+        #expect(LimitsProvider.glm.dashboardURL == ZaiWeb.dashboardURL)
+        #expect(LimitsProvider.gemini.dashboardURL == nil)
+        #expect(LimitsProvider.claude.statusPageURL?.absoluteString == "https://status.claude.com")
+        #expect(LimitsProvider.glm.statusPageURL == nil, "у Z.AI нет публичной страницы статуса")
+        #expect(LimitsProvider.gemini.statusPageURL?.absoluteString == "https://www.google.com/appsstatus/dashboard/products/npdyhgECDJ6tB66MxXyo/history")
+    }
+
+    @Test func limitBlocksStayAtTheTop() {
+        #expect(LimitsBlock.limitsIndex(for: .claudeLimits, in: [.glmLimits, .claudeCost]) == 0)
+        #expect(LimitsBlock.limitsIndex(for: .glmLimits, in: [.claudeLimits, .geminiLimits, .claudeCost]) == 1)
+        #expect(LimitsBlock.limitsIndex(for: .geminiLimits, in: [.claudeLimits, .glmLimits, .claudeCost]) == 2)
+        #expect(LimitsBlock.limitsIndex(for: .geminiLimits, in: [.claudeCost]) == 0)
+        #expect(LimitsBlock.limitsIndex(for: .glmLimits, in: [.geminiLimits, .claudeCost]) == 0)
+    }
+
+    /// У каждого источника своя история замеров — графики «Использование плана» не смешиваются.
+    @Test func historyFilePerProvider() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("NorthyTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let now = Date(timeIntervalSince1970: 1_785_800_000)
+        let snapshot = UsageSnapshot(windows: [
+            UsageWindow(kind: .session, percent: 10, resetsAt: now + 3600),
+            UsageWindow(kind: .weekly, percent: 20, resetsAt: now + 86_400),
+        ], fetchedAt: now)
+
+        let gemini = UsageHistory(directory: directory, fileName: LimitsProvider.gemini.historyFileName)
+        gemini.record(snapshot)
+        gemini.flush()
+        #expect(UsageHistory(directory: directory, fileName: LimitsProvider.gemini.historyFileName).samples.count == 1)
+        #expect(UsageHistory(directory: directory, fileName: LimitsProvider.glm.historyFileName).samples.isEmpty)
+        #expect(UsageHistory(directory: directory).samples.isEmpty)
+        #expect(LimitsProvider.claude.historyFileName == "claude-usage-history.json", "прежний файл истории Claude")
+    }
+
+    /// Блоки Gemini появились позже: в уже настроенный список они добавляются один раз.
+    @Test func geminiBlocksAreOfferedOnceToSavedList() throws {
+        let (_, defaults, suite) = try isolatedSettings()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.removeObject(forKey: "limits.geminiBlocksOffered")
+        defaults.set(["claudeLimits", "glmLimits", "claudeCost"], forKey: "limits.blocks")
+
+        let upgraded = AppSettings(defaults: defaults)
+        #expect(upgraded.limitsBlocks == [.claudeLimits, .glmLimits, .geminiLimits, .claudeCost, .glmPlanHistory, .geminiDetails, .geminiPlanHistory])
+
+        upgraded.limitsBlocks = [.claudeLimits]
+        #expect(AppSettings(defaults: defaults).limitsBlocks == [.claudeLimits], "убранные блоки сами не возвращаются")
     }
 }
