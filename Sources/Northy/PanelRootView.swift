@@ -62,6 +62,7 @@ struct PanelRootView: View {
     var limitsStore: LimitsStore
     var glmStore: LimitsStore
     var geminiStore: LimitsStore
+    var codexStore: LimitsStore
     var tokenStore: TokenStatsStore
     var settings: AppSettings
     var zaiKeys: ZaiKeyStore
@@ -134,12 +135,14 @@ struct PanelRootView: View {
         }
     }
 
-    /// Кольца в шапке — по первому показываемому источнику: Claude, а если он скрыт — GLM, затем Gemini.
+    /// Кольца в шапке — по первому показываемому источнику.
     private var headerLimitsStore: LimitsStore? {
-        switch LimitsProvider.available(enabled: settings.enabledProviders, hasGLMKey: zaiKeys.hasKey, hasGeminiLogin: GeminiWeb.hasLogin).first {
+        switch LimitsProvider.available(enabled: settings.enabledProviders, hasGLMKey: zaiKeys.hasKey,
+                                        hasGeminiLogin: GeminiWeb.hasLogin, hasCodexCLI: CodexCLI.isInstalled).first {
         case .claude: limitsStore
         case .glm: glmStore
         case .gemini: geminiStore
+        case .codex: codexStore
         case nil: nil
         }
     }
@@ -165,7 +168,10 @@ struct PanelRootView: View {
                     tabLayer(.translator) { TranslatorView() }
                 }
                 if uiState.enabledTabs.contains(.limits) {
-                    tabLayer(.limits) { LimitsView(store: limitsStore, glm: glmStore, gemini: geminiStore, tokens: tokenStore, settings: settings, uiState: uiState) }
+                    tabLayer(.limits) {
+                        LimitsView(store: limitsStore, glm: glmStore, gemini: geminiStore, codex: codexStore,
+                                   tokens: tokenStore, settings: settings, uiState: uiState)
+                    }
                 }
                 if uiState.enabledTabs.contains(.music) {
                     tabLayer(.music) { MusicView() }

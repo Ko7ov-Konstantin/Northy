@@ -7,6 +7,7 @@ struct LimitsMenuCard: View {
     var store: LimitsStore
     var glm: LimitsStore
     var gemini: LimitsStore
+    var codex: LimitsStore
     var tokens: TokenStatsStore
     @Bindable var settings: AppSettings
     var zaiKeys: ZaiKeyStore
@@ -14,7 +15,8 @@ struct LimitsMenuCard: View {
     @State private var isHovering = false
 
     var body: some View {
-        let providers = LimitsProvider.available(enabled: settings.enabledProviders, hasGLMKey: zaiKeys.hasKey, hasGeminiLogin: GeminiWeb.hasLogin)
+        let providers = LimitsProvider.available(enabled: settings.enabledProviders, hasGLMKey: zaiKeys.hasKey,
+                                                hasGeminiLogin: GeminiWeb.hasLogin, hasCodexCLI: CodexCLI.isInstalled)
         let selected = LimitsProvider.resolve(settings.menuProvider, available: providers)
         return TimelineView(.periodic(from: .now, by: 30)) { context in
             VStack(alignment: .leading, spacing: 12) {
@@ -41,10 +43,13 @@ struct LimitsMenuCard: View {
                     header(LimitsProvider.glm.fullTitle, store: glm, hasSubmenu: false, now: context.date)
                     Divider()
                     quotaSection(glm, now: context.date) { [ZaiPeak(now: context.date).detail(usesCredits: $0.usesCredits, now: context.date)] }
-                case .gemini:
-                    header(LimitsProvider.gemini.fullTitle, store: gemini, hasSubmenu: false, now: context.date)
-                    Divider()
-                    quotaSection(gemini, now: context.date)
+                case .gemini, .codex:
+                    if let selected {
+                        let source = self.store(for: selected)
+                        header(selected.fullTitle, store: source, hasSubmenu: false, now: context.date)
+                        Divider()
+                        quotaSection(source, now: context.date)
+                    }
                 case nil:
                     Text("Источники лимитов выключены — включите их в настройках")
                         .font(.system(size: 11))
@@ -74,6 +79,7 @@ struct LimitsMenuCard: View {
                 VStack(spacing: 5) {
                     Text(provider.title)
                         .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
                         .foregroundStyle(isOn ? AnyShapeStyle(Color.white) : AnyShapeStyle(.primary))
                     Capsule().fill(isOn ? Color.white.opacity(0.3) : Color.primary.opacity(0.12))
                         .overlay(alignment: .leading) {
@@ -84,7 +90,7 @@ struct LimitsMenuCard: View {
                         }
                         .frame(height: 3)
                 }
-                .padding(.horizontal, 10)
+                .padding(.horizontal, providers.count > 3 ? 6 : 10)
                 .padding(.vertical, 6)
                 .frame(maxWidth: .infinity)
                 .background(
@@ -113,10 +119,11 @@ struct LimitsMenuCard: View {
         case .claude: store
         case .glm: glm
         case .gemini: gemini
+        case .codex: codex
         }
     }
 
-    /// Лимиты GLM и Gemini: окна и детали квоты; leading — строки перед деталями (пиковое время GLM).
+    /// Окна и детали квоты; leading — строки перед деталями (пиковое время GLM).
     @ViewBuilder
     private func quotaSection(_ source: LimitsStore, now: Date, leading: (UsageSnapshot) -> [UsageDetail] = { _ in [] }) -> some View {
         if let snapshot = source.snapshot {
@@ -278,13 +285,14 @@ struct RefreshMenuRow: View {
     var limits: LimitsStore
     var glm: LimitsStore
     var gemini: LimitsStore
+    var codex: LimitsStore
     var tokens: TokenStatsStore
     let action: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
-        let isBusy = limits.isLoading || glm.isLoading || gemini.isLoading || tokens.isScanning
+        let isBusy = limits.isLoading || glm.isLoading || gemini.isLoading || codex.isLoading || tokens.isScanning
         HStack(spacing: 6) {
             Text("Обновить")
             Spacer()

@@ -19,6 +19,24 @@ struct LimitsBlocksTests {
         #expect(settings.menuProvider == .claude)
     }
 
+    @Test func codexIsOfferedOnceWithoutChangingExistingChoices() throws {
+        let (_, defaults, suite) = try isolatedSettings()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.removeObject(forKey: "limits.codexOffered")
+        defaults.set(["glm"], forKey: "limits.providers")
+        defaults.set(["glmLimits", "claudeCost"], forKey: "limits.blocks")
+
+        let upgraded = AppSettings(defaults: defaults)
+        #expect(Set(upgraded.enabledProviders.map(\.rawValue)) == ["glm", "codex"])
+        #expect(upgraded.limitsBlocks.map(\.rawValue) == ["glmLimits", "codexLimits", "claudeCost", "codexPlanHistory"])
+
+        upgraded.enabledProviders = [.glm]
+        upgraded.limitsBlocks = [.glmLimits, .claudeCost]
+        let reloaded = AppSettings(defaults: defaults)
+        #expect(reloaded.enabledProviders == [.glm])
+        #expect(reloaded.limitsBlocks == [.glmLimits, .claudeCost])
+    }
+
     @Test func blocksAndMenuTabPersist() throws {
         let (settings, defaults, suite) = try isolatedSettings()
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -66,15 +84,17 @@ struct LimitsBlocksTests {
         #expect(LimitsBlock.insertionIndex(frames: [], point: .zero) == 0)
     }
 
-    /// Источник показывается, когда включён в настройках; GLM нужен ещё ключ, Gemini — вход Google из Antigravity.
+    /// Источник показывается, когда включён в настройках и доступен на этом Mac.
     @Test func providersFollowSettingsKeyAndLogin() {
         let all = Set(LimitsProvider.allCases)
-        #expect(LimitsProvider.available(enabled: all, hasGLMKey: true, hasGeminiLogin: true) == [.claude, .glm, .gemini])
-        #expect(LimitsProvider.available(enabled: all, hasGLMKey: false, hasGeminiLogin: true) == [.claude, .gemini])
-        #expect(LimitsProvider.available(enabled: all, hasGLMKey: true, hasGeminiLogin: false) == [.claude, .glm])
-        #expect(LimitsProvider.available(enabled: [.gemini], hasGLMKey: true, hasGeminiLogin: true) == [.gemini], "один источник из трёх")
-        #expect(LimitsProvider.available(enabled: [.glm, .gemini], hasGLMKey: false, hasGeminiLogin: false).isEmpty)
-        #expect(LimitsProvider.available(enabled: [], hasGLMKey: true, hasGeminiLogin: true).isEmpty)
+        #expect(LimitsProvider.available(enabled: all, hasGLMKey: true, hasGeminiLogin: true, hasCodexCLI: true) == [.claude, .glm, .gemini, .codex])
+        #expect(LimitsProvider.available(enabled: all, hasGLMKey: true, hasGeminiLogin: true, hasCodexCLI: false) == [.claude, .glm, .gemini])
+        #expect(LimitsProvider.available(enabled: all, hasGLMKey: false, hasGeminiLogin: true, hasCodexCLI: false) == [.claude, .gemini])
+        #expect(LimitsProvider.available(enabled: all, hasGLMKey: true, hasGeminiLogin: false, hasCodexCLI: false) == [.claude, .glm])
+        #expect(LimitsProvider.available(enabled: [.gemini], hasGLMKey: true, hasGeminiLogin: true, hasCodexCLI: true) == [.gemini])
+        #expect(LimitsProvider.available(enabled: [.codex], hasGLMKey: false, hasGeminiLogin: false, hasCodexCLI: true) == [.codex])
+        #expect(LimitsProvider.available(enabled: [.glm, .gemini], hasGLMKey: false, hasGeminiLogin: false, hasCodexCLI: false).isEmpty)
+        #expect(LimitsProvider.available(enabled: [], hasGLMKey: true, hasGeminiLogin: true, hasCodexCLI: true).isEmpty)
 
         #expect(LimitsProvider.resolve(.glm, available: [.claude, .glm]) == .glm)
         #expect(LimitsProvider.resolve(.glm, available: [.claude]) == .claude)

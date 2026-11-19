@@ -43,12 +43,16 @@ struct SettingsView: View {
     var zaiKeys: ZaiKeyStore
     var glm: LimitsStore
     var gemini: LimitsStore
+    var codex: LimitsStore
     var tokenStore: TokenStatsStore
     let onZaiKeyChanged: () -> Void
+    let onCodexLogin: () -> Void
     let onClearClipboard: () -> Void
 
     @State private var zaiKeyDraft = ""
     @State private var zaiKeyError: String?
+    @State private var codexLoginTask: Task<Void, Never>?
+    @State private var codexLoginError: String?
 
     @State private var launchState = LaunchAtLogin.state
     @State private var launchError: String?
@@ -138,7 +142,8 @@ struct SettingsView: View {
                 Toggle("Лимиты Claude", isOn: providerBinding(.claude))
                 Toggle("Лимиты GLM", isOn: providerBinding(.glm))
                 Toggle("Лимиты Gemini", isOn: providerBinding(.gemini))
-                Text("Источники независимы: можно включить один, два или все три. Выключенный источник не запрашивается и пропадает из меню, строки меню и колец в шапке: без лимитов Claude Northy не обращается к claude.ai. Цифры в строке меню берутся из первого включённого: Claude, затем GLM, затем Gemini. Какие карточки видны во вкладке «Лимиты», настраивается в ней самой кнопкой «Настроить блоки» и на включённость источника не влияет.")
+                Toggle("Лимиты Codex", isOn: providerBinding(.codex))
+                Text("Каждый источник можно включать отдельно. Цифры в строке меню берутся из первого доступного источника в порядке Claude, GLM, Gemini, Codex. Карточки во вкладке «Лимиты» можно переставить или скрыть кнопкой «Настроить блоки».")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
@@ -195,6 +200,30 @@ struct SettingsView: View {
                 Text("Northy запрашивает квоту через установленный Antigravity CLI (agy -p \"/usage\") — токены остаются в самом Antigravity и не читаются напрямую. Если CLI не найден, используется прежний файл входа в ~/.gemini.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
+            }
+            Section("Подписка Codex") {
+                if let task = codexLoginTask {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Завершите вход в браузере")
+                        Button("Отменить") { task.cancel() }
+                    }
+                } else {
+                    Button("Войти через ChatGPT", action: startCodexLogin)
+                        .disabled(!CodexCLI.isInstalled)
+                    if let error = codexLoginError ?? codex.errorMessage {
+                        Label(error, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    } else if codex.isLoading {
+                        ProgressView("Запрашиваю лимиты Codex…").controlSize(.small)
+                    } else if let snapshot = codex.snapshot {
+                        Text(snapshot.plan.map { "Квоты получены · тариф \($0)" } ?? "Квоты получены")
+                            .foregroundStyle(.secondary)
+                    } else if !CodexCLI.isInstalled {
+                        Text(CodexCLI.FetchError.missingCLI.localizedDescription)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
         case .recording:
@@ -336,6 +365,21 @@ extension SettingsView {
                 if isOn { settings.enabledProviders.insert(provider) } else { settings.enabledProviders.remove(provider) }
             }
         )
+    }
+
+    private func startCodexLogin() {
+        guard codexLoginTask == nil, let binary = CodexCLI.findBinary() else { return }
+        codexLoginError = nil
+        codexLoginTask = Task {
+            defer { codexLoginTask = nil }
+            do {
+                try await CodexCLI.login(binary: binary)
+                onCodexLogin()
+            } catch is CancellationError {
+            } catch {
+                codexLoginError = error.localizedDescription
+            }
+        }
     }
 
     fileprivate func saveZaiKey() {

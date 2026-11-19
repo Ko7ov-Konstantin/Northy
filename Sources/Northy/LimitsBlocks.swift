@@ -2,15 +2,16 @@ import CoreGraphics
 import Foundation
 import SwiftUI
 
-/// Источник лимитов: подписка Claude, GLM Coding Plan (Z.AI) или Gemini по входу Google из Antigravity.
+/// Источник лимитов подписки.
 nonisolated enum LimitsProvider: String, CaseIterable, Sendable {
-    case claude, glm, gemini
+    case claude, glm, gemini, codex
 
     var title: String {
         switch self {
         case .claude: "Claude"
         case .glm: "GLM"
         case .gemini: "Gemini"
+        case .codex: "Codex"
         }
     }
 
@@ -20,6 +21,7 @@ nonisolated enum LimitsProvider: String, CaseIterable, Sendable {
         case .claude: "Claude"
         case .glm: "GLM · Z.AI"
         case .gemini: "Gemini · Antigravity"
+        case .codex: "Codex"
         }
     }
 
@@ -28,7 +30,7 @@ nonisolated enum LimitsProvider: String, CaseIterable, Sendable {
         switch self {
         case .claude: URL(string: "https://claude.ai/settings/usage")
         case .glm: ZaiWeb.dashboardURL
-        case .gemini: nil
+        case .gemini, .codex: nil
         }
     }
 
@@ -36,7 +38,7 @@ nonisolated enum LimitsProvider: String, CaseIterable, Sendable {
     var statusPageURL: URL? {
         switch self {
         case .claude: StatusPage.pageURL
-        case .glm: nil
+        case .glm, .codex: nil
         case .gemini: StatusPage.geminiPageURL
         }
     }
@@ -47,21 +49,22 @@ nonisolated enum LimitsProvider: String, CaseIterable, Sendable {
         case .claude: Theme.sky
         case .glm: Theme.mint
         case .gemini: Theme.violet
+        case .codex: Theme.amber
         }
     }
 
     /// Файл истории замеров для графика «Использование плана».
     var historyFileName: String { "\(rawValue)-usage-history.json" }
 
-    /// Какие источники сейчас показываются: включённые в настройках; GLM нужен ещё ключ,
-    /// Gemini — вход Google из Antigravity. Блоки вкладки «Лимиты» на это не влияют.
-    static func available(enabled: Set<LimitsProvider>, hasGLMKey: Bool, hasGeminiLogin: Bool) -> [LimitsProvider] {
+    /// Какие источники показываются с текущими настройками и доступами.
+    static func available(enabled: Set<LimitsProvider>, hasGLMKey: Bool, hasGeminiLogin: Bool, hasCodexCLI: Bool) -> [LimitsProvider] {
         allCases.filter { provider in
             guard enabled.contains(provider) else { return false }
             switch provider {
             case .claude: return true
             case .glm: return hasGLMKey
             case .gemini: return hasGeminiLogin
+            case .codex: return hasCodexCLI
             }
         }
     }
@@ -74,10 +77,11 @@ nonisolated enum LimitsProvider: String, CaseIterable, Sendable {
 
 /// Блок вкладки «Лимиты». Пользователь сам решает, какие блоки видны и в каком порядке.
 nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
-    case claudeLimits, glmLimits, geminiLimits
+    case claudeLimits, glmLimits, geminiLimits, codexLimits
     case claudeCost, claudeSessions, claudeDailyCost, claudePlanHistory
     case glmDetails, glmHourly, glmDaily, glmPlanHistory
     case geminiDetails, geminiPlanHistory
+    case codexPlanHistory
 
     var id: String { rawValue }
 
@@ -86,6 +90,7 @@ nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
         case .claudeLimits: "Лимиты Claude"
         case .glmLimits: "Лимиты GLM"
         case .geminiLimits: "Лимиты Gemini"
+        case .codexLimits: "Лимиты Codex"
         case .claudeCost: "Стоимость Claude Code"
         case .claudeSessions: "Сессии Claude Code"
         case .claudeDailyCost: "Стоимость по дням"
@@ -96,16 +101,17 @@ nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
         case .glmPlanHistory: "Использование плана GLM"
         case .geminiDetails: "Детали квоты Gemini"
         case .geminiPlanHistory: "Использование плана Gemini"
+        case .codexPlanHistory: "Использование плана Codex"
         }
     }
 
     var icon: String {
         switch self {
-        case .claudeLimits, .glmLimits, .geminiLimits: "gauge.with.dots.needle.50percent"
+        case .claudeLimits, .glmLimits, .geminiLimits, .codexLimits: "gauge.with.dots.needle.50percent"
         case .claudeCost: "dollarsign.circle"
         case .claudeSessions: "terminal"
         case .claudeDailyCost: "chart.bar"
-        case .claudePlanHistory, .glmPlanHistory, .geminiPlanHistory: "chart.bar.xaxis"
+        case .claudePlanHistory, .glmPlanHistory, .geminiPlanHistory, .codexPlanHistory: "chart.bar.xaxis"
         case .glmDetails, .geminiDetails: "list.bullet.rectangle"
         case .glmHourly, .glmDaily: "chart.bar"
         }
@@ -116,13 +122,14 @@ nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
         case .claudeLimits, .claudeCost, .claudeSessions, .claudeDailyCost, .claudePlanHistory: .claude
         case .glmLimits, .glmDetails, .glmHourly, .glmDaily, .glmPlanHistory: .glm
         case .geminiLimits, .geminiDetails, .geminiPlanHistory: .gemini
+        case .codexLimits, .codexPlanHistory: .codex
         }
     }
 
     /// Небольшие графики встают по два в ряд.
     var isHalfWidth: Bool {
         switch self {
-        case .claudeDailyCost, .claudePlanHistory, .glmHourly, .glmDaily, .glmPlanHistory, .geminiPlanHistory: true
+        case .claudeDailyCost, .claudePlanHistory, .glmHourly, .glmDaily, .glmPlanHistory, .geminiPlanHistory, .codexPlanHistory: true
         default: false
         }
     }
@@ -144,10 +151,11 @@ nonisolated enum LimitsBlock: String, CaseIterable, Identifiable, Sendable {
         case .claude: .claudeLimits
         case .glm: .glmLimits
         case .gemini: .geminiLimits
+        case .codex: .codexLimits
         }
     }
 
-    /// Куда встаёт возвращённый блок лимитов: в начало, в порядке Claude, GLM, Gemini.
+    /// Куда встаёт возвращённый блок лимитов: в начало, в порядке источников.
     static func limitsIndex(for block: LimitsBlock, in blocks: [LimitsBlock]) -> Int {
         let order = LimitsProvider.allCases.map(limits(of:))
         let earlier = order.prefix { $0 != block }

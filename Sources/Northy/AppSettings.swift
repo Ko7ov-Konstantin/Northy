@@ -90,6 +90,7 @@ final class AppSettings {
         static let limitsBlocks = "limits.blocks"
         static let menuProvider = "limits.menuProvider"
         static let geminiBlocksOffered = "limits.geminiBlocksOffered"
+        static let codexOffered = "limits.codexOffered"
         static let providers = "limits.providers"
         static let recordingSystemSound = "recording.systemSound"
         static let recordingMicrophone = "recording.microphone"
@@ -121,15 +122,18 @@ final class AppSettings {
         }
         defaults.set(true, forKey: Keys.toolsTabOffered)
         let savedBlocks = defaults.stringArray(forKey: Keys.limitsBlocks).map(LimitsBlock.sanitized)
+        let offerCodex = !defaults.bool(forKey: Keys.codexOffered)
+        var providers: Set<LimitsProvider>
         if let stored = defaults.stringArray(forKey: Keys.providers) {
-            enabledProviders = Set(stored.compactMap(LimitsProvider.init(rawValue:)))
+            providers = Set(stored.compactMap(LimitsProvider.init(rawValue:)))
         } else {
             // Раньше Claude и GLM выключали, убирая их блок лимитов, — этот выбор переносится один раз.
             let wasHidden = { (provider: LimitsProvider) in savedBlocks.map { !$0.contains(LimitsBlock.limits(of: provider)) } ?? false }
-            let providers = LimitsProvider.allCases.filter { $0 == .gemini || !wasHidden($0) }
-            enabledProviders = Set(providers)
-            defaults.set(providers.map(\.rawValue), forKey: Keys.providers)
+            providers = Set(LimitsProvider.allCases.filter { $0 == .gemini || !wasHidden($0) })
         }
+        if offerCodex { providers.insert(.codex) }
+        enabledProviders = providers
+        defaults.set(LimitsProvider.allCases.filter(providers.contains).map(\.rawValue), forKey: Keys.providers)
         if var blocks = savedBlocks {
             // Блоки Gemini и история плана GLM появились позже: в настроенный список
             // добавляются один раз; уберёт пользователь — не вернутся.
@@ -140,11 +144,19 @@ final class AppSettings {
                 }
                 defaults.set(blocks.map(\.rawValue), forKey: Keys.limitsBlocks)
             }
+            if offerCodex {
+                if !blocks.contains(.codexLimits) {
+                    blocks.insert(.codexLimits, at: LimitsBlock.limitsIndex(for: .codexLimits, in: blocks))
+                }
+                if !blocks.contains(.codexPlanHistory) { blocks.append(.codexPlanHistory) }
+                defaults.set(blocks.map(\.rawValue), forKey: Keys.limitsBlocks)
+            }
             limitsBlocks = blocks
         } else {
             limitsBlocks = LimitsBlock.allCases
         }
         defaults.set(true, forKey: Keys.geminiBlocksOffered)
+        defaults.set(true, forKey: Keys.codexOffered)
         menuProvider = defaults.string(forKey: Keys.menuProvider).flatMap(LimitsProvider.init(rawValue:)) ?? .claude
         recordingAudio = RecordingAudio(
             systemSound: defaults.object(forKey: Keys.recordingSystemSound) as? Bool ?? true,

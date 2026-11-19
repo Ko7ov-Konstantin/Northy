@@ -131,7 +131,7 @@ nonisolated enum StatusPage {
         switch provider {
         case .claude: url = componentsURL
         case .gemini: url = googleIncidentsURL
-        case .glm: return []
+        case .glm, .codex: return []
         }
         var request = URLRequest(url: url)
         request.timeoutInterval = 10

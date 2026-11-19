@@ -121,6 +121,7 @@ final class PanelController: NSObject {
         source: ZaiLimitsSource(keys: zaiKeys), history: UsageHistory(fileName: LimitsProvider.glm.historyFileName)
     )
     let geminiStore = LimitsStore(source: GeminiLimitsSource(), history: UsageHistory(fileName: LimitsProvider.gemini.historyFileName))
+    let codexStore = LimitsStore(source: CodexLimitsSource(), history: UsageHistory(fileName: LimitsProvider.codex.historyFileName))
     /// Пункты меню, которые есть только у одного источника; общие пункты подстраиваются под выбранную вкладку.
     private var glmMenuItems: [NSMenuItem] = []
     private var claudeMenuItems: [NSMenuItem] = []
@@ -131,7 +132,8 @@ final class PanelController: NSObject {
     private var claudeWasShown = true
 
     private var limitsProviders: [LimitsProvider] {
-        LimitsProvider.available(enabled: settings.enabledProviders, hasGLMKey: zaiKeys.hasKey, hasGeminiLogin: GeminiWeb.hasLogin)
+        LimitsProvider.available(enabled: settings.enabledProviders, hasGLMKey: zaiKeys.hasKey,
+                                 hasGeminiLogin: GeminiWeb.hasLogin, hasCodexCLI: CodexCLI.isInstalled)
     }
     /// Вкладка меню: выбранный источник, а если он скрыт — первый показываемый.
     private var menuProvider: LimitsProvider? {
@@ -142,6 +144,7 @@ final class PanelController: NSObject {
         case .claude: limitsStore
         case .glm: glmStore
         case .gemini: geminiStore
+        case .codex: codexStore
         }
     }
     /// Выключенный в настройках Claude — Northy не ходит на claude.ai.
@@ -163,8 +166,10 @@ final class PanelController: NSObject {
             zaiKeys: zaiKeys,
             glm: glmStore,
             gemini: geminiStore,
+            codex: codexStore,
             tokenStore: tokenStore,
-            onZaiKeyChanged: { [weak self] in self?.zaiKeyChanged() }
+            onZaiKeyChanged: { [weak self] in self?.zaiKeyChanged() },
+            onCodexLogin: { [weak self] in self?.codexLoginCompleted() }
         ) { [weak self] in self?.clipboardStore.clear() }
     }
 
@@ -233,6 +238,7 @@ final class PanelController: NSObject {
             limitsStore: limitsStore,
             glmStore: glmStore,
             geminiStore: geminiStore,
+            codexStore: codexStore,
             tokenStore: tokenStore,
             settings: settings,
             zaiKeys: zaiKeys,
@@ -328,7 +334,8 @@ final class PanelController: NSObject {
         menu.delegate = self
 
         // Карточка лимитов, как у CodexBar: SwiftUI-вью прямо в меню, следит за LimitsStore сама.
-        let card = NSHostingView(rootView: LimitsMenuCard(store: limitsStore, glm: glmStore, gemini: geminiStore, tokens: tokenStore, settings: settings, zaiKeys: zaiKeys))
+        let card = NSHostingView(rootView: LimitsMenuCard(store: limitsStore, glm: glmStore, gemini: geminiStore,
+                                                        codex: codexStore, tokens: tokenStore, settings: settings, zaiKeys: zaiKeys))
         card.sizingOptions = [.intrinsicContentSize]
         card.frame.size = card.fittingSize
         limitsCard = card
@@ -372,7 +379,8 @@ final class PanelController: NSObject {
         // обновляются прямо в открытой карточке. ⌘R работает как обычно.
         let refreshItem = NSMenuItem(title: "Обновить", action: #selector(refreshFromStatusMenu), keyEquivalent: "r")
         refreshItem.target = self
-        let refreshRow = NSHostingView(rootView: RefreshMenuRow(limits: limitsStore, glm: glmStore, gemini: geminiStore, tokens: tokenStore) { [weak self] in
+        let refreshRow = NSHostingView(rootView: RefreshMenuRow(limits: limitsStore, glm: glmStore, gemini: geminiStore,
+                                                             codex: codexStore, tokens: tokenStore) { [weak self] in
             self?.refreshEverything(force: true)
         })
         refreshRow.frame.size = refreshRow.fittingSize
@@ -430,7 +438,7 @@ final class PanelController: NSObject {
             statusPageMenuItem?.isHidden = provider?.statusPageURL == nil
             if provider != statusSubmenuProvider { fillStatusSubmenu() }
             limitsCardItem?.submenu = provider == .claude ? claudeCardSubmenu : nil
-            for store in [glmStore, geminiStore] {
+            for store in [glmStore, geminiStore, codexStore] {
                 _ = store.snapshot
                 _ = store.errorMessage
                 _ = store.isLoading
@@ -460,7 +468,7 @@ final class PanelController: NSObject {
 
     /// Строки остатка для строки меню. До первого обновления после запуска —
     /// последние известные: при включённых лимитах в строке меню только цифры.
-    /// Источник — первый показываемый: Claude, а если его лимиты скрыты — GLM, затем Gemini.
+    /// Источник — первый показываемый по порядку LimitsProvider.
     private func statusBarLines() -> [String] {
         guard let provider = limitsProviders.first else { return [] }
         let key = provider == .claude ? "statusBar.lastLines" : "statusBar.lastLines.\(provider.rawValue)"
@@ -640,6 +648,7 @@ final class PanelController: NSObject {
         }
         refreshGLM(force: true)
         refreshGemini(force: true)
+        refreshCodex(force: force)
         if geminiWanted { refreshStatusPage(for: .gemini) }
         if tokenLogsWanted {
             Task { await tokenStore.refresh(force: force) }
@@ -658,6 +667,7 @@ final class PanelController: NSObject {
         if !claudeShown, limitsStore.snapshot != nil || limitsStore.errorMessage != nil { limitsStore.reset() }
         if !glmWanted, glmStore.snapshot != nil || glmStore.errorMessage != nil { glmStore.reset() }
         if !geminiWanted, geminiStore.snapshot != nil || geminiStore.errorMessage != nil { geminiStore.reset() }
+        if !settings.enabledProviders.contains(.codex) { codexStore.reset() }
         if claudeShown, !claudeWasShown, limitsEnabled { requestDiskAccessIfNeeded() }
         claudeWasShown = claudeShown
         refreshLimits()
@@ -675,6 +685,16 @@ final class PanelController: NSObject {
         Task { await geminiStore.refresh(force: force) }
     }
 
+    private func refreshCodex(force: Bool) {
+        guard limitsProviders.contains(.codex) else { return }
+        Task { await codexStore.refresh(force: force) }
+    }
+
+    private func codexLoginCompleted() {
+        codexStore.reset()
+        if limitsEnabled { refreshCodex(force: true) }
+    }
+
     /// Ключ Z.AI сохранён или удалён в настройках: новый сразу проверяется запросом.
     private func zaiKeyChanged() {
         glmStore.reset()
@@ -689,6 +709,7 @@ final class PanelController: NSObject {
         }
         refreshGLM(force: false)
         refreshGemini(force: false)
+        refreshCodex(force: false)
         if tokenLogsWanted {
             Task { await tokenStore.refresh() }
         }

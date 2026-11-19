@@ -89,6 +89,7 @@ struct LimitsView: View {
     var glm: LimitsStore
     /// Лимиты Gemini; без входа Google из Antigravity стор пуст.
     var gemini: LimitsStore
+    var codex: LimitsStore
     var tokens: TokenStatsStore
     @Bindable var settings: AppSettings
     var uiState: PanelUIState
@@ -99,10 +100,12 @@ struct LimitsView: View {
     /// Режим правки, как у виджетов macOS: крестики на блоках и лоток скрытых.
     @State private var isEditing: Bool
 
-    init(store: LimitsStore, glm: LimitsStore, gemini: LimitsStore, tokens: TokenStatsStore, settings: AppSettings, uiState: PanelUIState, editing: Bool = false) {
+    init(store: LimitsStore, glm: LimitsStore, gemini: LimitsStore, codex: LimitsStore,
+         tokens: TokenStatsStore, settings: AppSettings, uiState: PanelUIState, editing: Bool = false) {
         self.store = store
         self.glm = glm
         self.gemini = gemini
+        self.codex = codex
         self.tokens = tokens
         self.settings = settings
         self.uiState = uiState
@@ -132,12 +135,17 @@ struct LimitsView: View {
         case .claudeLimits: store.snapshot != nil || store.errorMessage != nil
         case .glmLimits: glm.snapshot != nil || glm.errorMessage != nil
         case .geminiLimits: gemini.snapshot != nil || gemini.errorMessage != nil
+        case .codexLimits:
+            settings.enabledProviders.contains(.codex) && (codex.snapshot != nil || codex.errorMessage != nil)
         case .claudeCost: tokens.hasScanned && tokens.stats(for: store.snapshot).hasUsage
         case .claudeSessions, .claudeDailyCost: tokens.hasScanned
         case .claudePlanHistory: visible.contains(.claudeLimits) || !(store.history?.samples.isEmpty ?? true)
         // Без ключа Z.AI или входа Google история не накопится — пустой блок не показываем.
         case .glmPlanHistory, .geminiPlanHistory:
             hasContent(LimitsBlock.limits(of: block.provider)) || !(self.store(for: block.provider).history?.samples.isEmpty ?? true)
+        case .codexPlanHistory:
+            settings.enabledProviders.contains(.codex)
+                && (hasContent(.codexLimits) || !(codex.history?.samples.isEmpty ?? true))
         case .glmDetails: glm.snapshot != nil
         case .geminiDetails: !(gemini.snapshot?.details.isEmpty ?? true)
         case .glmHourly: series(Self.hourlyTitle) != nil
@@ -150,6 +158,7 @@ struct LimitsView: View {
         case .claude: store
         case .glm: glm
         case .gemini: gemini
+        case .codex: codex
         }
     }
 
@@ -202,7 +211,7 @@ struct LimitsView: View {
             .scrollIndicators(.automatic)
             .scrollClipDisabled()
             .mask { Rectangle().padding(.top, -Self.flameHeadroom) }
-        } else if store.isLoading || glm.isLoading || gemini.isLoading || tokens.isScanning {
+        } else if isLoading || tokens.isScanning {
             ProgressView().controlSize(.small)
         } else {
             EmptyStateView(
@@ -274,7 +283,7 @@ struct LimitsView: View {
                 } else if let error = store.errorMessage {
                     errorNote(error)
                 }
-            case .glmLimits, .geminiLimits:
+            case .glmLimits, .geminiLimits, .codexLimits:
                 let source = self.store(for: block.provider)
                 if showsProviderHeaders { providerHeader(block.provider.fullTitle, plan: source.snapshot?.plan) }
                 if let snapshot = source.snapshot {
@@ -306,7 +315,7 @@ struct LimitsView: View {
                 SectionCard(title: "Использование плана") {
                     PlanHistoryChart(samples: store.history?.samples ?? [], height: 80)
                 }
-            case .glmPlanHistory, .geminiPlanHistory:
+            case .glmPlanHistory, .geminiPlanHistory, .codexPlanHistory:
                 SectionCard(title: block.title) {
                     PlanHistoryChart(samples: self.store(for: block.provider).history?.samples ?? [], height: 80)
                 }
@@ -350,6 +359,7 @@ struct LimitsView: View {
         case .claude: "Пока нет данных"
         case .glm: "Появится, когда Z.AI отдаст данные по ключу"
         case .gemini: "Появится, когда Antigravity отдаст данные о квоте"
+        case .codex: "Появится, когда Codex отдаст данные о квоте"
         }
     }
 
@@ -476,7 +486,8 @@ struct LimitsView: View {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(Theme.amber)
                     .lineLimit(1)
-            } else if let fetchedAt = store.snapshot?.fetchedAt ?? glm.snapshot?.fetchedAt ?? gemini.snapshot?.fetchedAt {
+            } else if let fetchedAt = store.snapshot?.fetchedAt ?? glm.snapshot?.fetchedAt
+                ?? gemini.snapshot?.fetchedAt ?? codex.snapshot?.fetchedAt {
                 Text("Обновлено \(Formatting.relative(fetchedAt, now: now))")
                     .foregroundStyle(Theme.tertiaryText)
             }
@@ -489,7 +500,7 @@ struct LimitsView: View {
             ) {
                 withAnimation(Theme.tabSpring) { isEditing.toggle() }
             }
-            if store.isLoading || glm.isLoading || gemini.isLoading {
+            if isLoading {
                 ProgressView().controlSize(.mini)
             } else {
                 IconButton(systemName: "arrow.clockwise", size: 22, help: "Обновить") {
@@ -498,6 +509,10 @@ struct LimitsView: View {
             }
         }
         .font(.system(size: 11))
+    }
+
+    private var isLoading: Bool {
+        store.isLoading || glm.isLoading || gemini.isLoading || codex.isLoading
     }
 }
 
